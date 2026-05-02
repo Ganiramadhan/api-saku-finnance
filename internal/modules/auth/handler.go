@@ -1,0 +1,85 @@
+package auth
+
+import (
+	"github.com/ganiramadhan/starter-go/internal/constants"
+	"github.com/ganiramadhan/starter-go/internal/dto"
+	"github.com/ganiramadhan/starter-go/pkg/httpx"
+	"github.com/ganiramadhan/starter-go/pkg/validator"
+	"github.com/gofiber/fiber/v2"
+)
+
+type Handler struct {
+	service   Service
+	validator *validator.Validator
+}
+
+func NewHandler(s Service, v *validator.Validator) *Handler {
+	return &Handler{service: s, validator: v}
+}
+
+// Login godoc
+// @Summary   Login
+// @Tags      Auth
+// @Accept    json
+// @Produce   json
+// @Param     request  body  dto.LoginRequest  true  "Credentials"
+// @Success   200  {object}  dto.APIResponse{data=dto.AuthResponse}
+// @Failure   401  {object}  dto.APIResponse
+// @Router    /api/v1/auth/login [post]
+func (h *Handler) Login(c *fiber.Ctx) error {
+	var req dto.LoginRequest
+	if err := httpx.Bind(c, h.validator, &req); err != nil {
+		return err
+	}
+	resp, err := h.service.Login(c.Context(), req)
+	if err != nil {
+		return err
+	}
+	return httpx.OK(c, constants.MsgLogin, resp)
+}
+
+// Register godoc
+// @Summary   Register a new account
+// @Tags      Auth
+// @Accept    json
+// @Produce   json
+// @Param     request  body  dto.RegisterRequest  true  "Registration data"
+// @Success   201  {object}  dto.APIResponse{data=dto.AuthResponse}
+// @Failure   409  {object}  dto.APIResponse
+// @Router    /api/v1/auth/register [post]
+func (h *Handler) Register(c *fiber.Ctx) error {
+	var req dto.RegisterRequest
+	if err := httpx.Bind(c, h.validator, &req); err != nil {
+		return err
+	}
+	resp, err := h.service.Register(c.Context(), req)
+	if err != nil {
+		return err
+	}
+	return httpx.Created(c, constants.MsgRegister, resp)
+}
+
+// ChangePassword godoc
+// @Summary   Change my password
+// @Tags      Auth
+// @Accept    json
+// @Produce   json
+// @Param     request  body  dto.ChangePasswordRequest  true  "Old + new password"
+// @Success   200  {object}  dto.APIResponse
+// @Failure   401  {object}  dto.APIResponse
+// @Security  BearerAuth
+// @Router    /api/v1/auth/change-password [post]
+func (h *Handler) ChangePassword(c *fiber.Ctx) error {
+	uid, err := httpx.UserID(c)
+	if err != nil {
+		return err
+	}
+	var req dto.ChangePasswordRequest
+	if err := httpx.Bind(c, h.validator, &req); err != nil {
+		return err
+	}
+	if err := h.service.ChangePassword(c.Context(), uid, req); err != nil {
+		return err
+	}
+	return httpx.OK(c, constants.MsgChangePassword, nil)
+}

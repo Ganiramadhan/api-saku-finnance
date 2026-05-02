@@ -1,0 +1,550 @@
+basePath: /
+definitions:
+  github_com_ganiramadhan_starter-go_internal_dto.APIResponse:
+    properties:
+      code:
+        example: 200
+        type: integer
+      data: {}
+      message:
+        example: Success
+        type: string
+      meta:
+        $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.PaginationMeta'
+      status:
+        example: success
+        type: string
+    type: object
+  github_com_ganiramadhan_starter-go_internal_dto.AuthResponse:
+    properties:
+      token:
+        example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+        type: string
+      user:
+        $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.UserResponse'
+    type: object
+  github_com_ganiramadhan_starter-go_internal_dto.ChangePasswordRequest:
+    properties:
+      current_password:
+        example: oldSecret123
+        type: string
+      new_password:
+        example: newSecret123
+        maxLength: 72
+        minLength: 6
+        type: string
+    required:
+    - current_password
+    - new_password
+    type: object
+  github_com_ganiramadhan_starter-go_internal_dto.CreateUserRequest:
+    properties:
+      email:
+        example: john@example.com
+        type: string
+      name:
+        example: John Doe
+        maxLength: 120
+        minLength: 2
+        type: string
+      password:
+        example: password123
+        maxLength: 72
+        minLength: 6
+        type: string
+      photo:
+        example: temp/users/avatar-1a2b3c4d.png
+        type: string
+      role:
+        enum:
+        - user
+        - admin
+        example: user
+        type: string
+    required:
+    - email
+    - name
+    - password
+    type: object
+  github_com_ganiramadhan_starter-go_internal_dto.LoginRequest:
+    properties:
+      email:
+        example: john@example.com
+        type: string
+      password:
+        example: password123
+        type: string
+    required:
+    - email
+    - password
+    type: object
+  github_com_ganiramadhan_starter-go_internal_dto.PaginationMeta:
+    properties:
+      has_next:
+        example: true
+        type: boolean
+      has_previous:
+        example: false
+        type: boolean
+      limit:
+        example: 10
+        type: integer
+      page:
+        example: 1
+        type: integer
+      total:
+        example: 100
+        type: integer
+      total_pages:
+        example: 10
+        type: integer
+    type: object
+  github_com_ganiramadhan_starter-go_internal_dto.RegisterRequest:
+    properties:
+      email:
+        example: john@example.com
+        type: string
+      name:
+        example: John Doe
+        maxLength: 120
+        minLength: 2
+        type: string
+      password:
+        example: password123
+        maxLength: 72
+        minLength: 6
+        type: string
+    required:
+    - email
+    - name
+    - password
+    type: object
+  github_com_ganiramadhan_starter-go_internal_dto.UpdateUserRequest:
+    properties:
+      email:
+        example: jane@example.com
+        type: string
+      name:
+        example: Jane Doe
+        maxLength: 120
+        minLength: 2
+        type: string
+      password:
+        example: newpassword123
+        maxLength: 72
+        minLength: 6
+        type: string
+      photo:
+        example: temp/users/avatar-1a2b3c4d.png
+        type: string
+      role:
+        enum:
+        - user
+        - admin
+        example: admin
+        type: string
+    type: object
+  github_com_ganiramadhan_starter-go_internal_dto.UploadResponse:
+    properties:
+      image:
+        example: temp/users/avatar-1a2b3c4d.png
+        type: string
+      preview_expires_in:
+        example: 604800
+        type: integer
+      preview_url:
+        example: https://minio.local/starter/temp/users/avatar-1a2b3c4d.png?X-Amz-...
+        type: string
+    type: object
+  github_com_ganiramadhan_starter-go_internal_dto.UserResponse:
+    properties:
+      email:
+        example: john@example.com
+        type: string
+      id:
+        example: 550e8400-e29b-41d4-a716-446655440000
+        type: string
+      name:
+        example: John Doe
+        type: string
+      photo:
+        example: users/<uuid>/avatar.png
+        type: string
+      photo_url:
+        example: https://minio.local/starter/users/<uuid>/avatar.png?X-Amz-...
+        type: string
+      role:
+        example: user
+        type: string
+    type: object
+host: localhost:4000
+info:
+  contact:
+    name: API Support
+  description: Minimal, production-ready Go API starter built with Fiber, GORM, JWT,
+    and S3-compatible object storage.
+  termsOfService: http://swagger.io/terms/
+  title: Starter Go API
+  version: "1.0"
+paths:
+  /api/v1/admin/users:
+    get:
+      parameters:
+      - default: 1
+        description: Page number
+        in: query
+        name: page
+        type: integer
+      - default: 10
+        description: Items per page
+        in: query
+        name: limit
+        type: integer
+      - description: Search by name or email
+        in: query
+        name: search
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.UserResponse'
+                  type: array
+              type: object
+      security:
+      - BearerAuth: []
+      summary: List users (admin)
+      tags:
+      - Users
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: User data
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.CreateUserRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.UserResponse'
+              type: object
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: Create user (admin)
+      tags:
+      - Users
+  /api/v1/admin/users/{id}:
+    delete:
+      parameters:
+      - description: User UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: Delete user (admin)
+      tags:
+      - Users
+    get:
+      parameters:
+      - description: User UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.UserResponse'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: Get user by ID (admin)
+      tags:
+      - Users
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: User UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: User data
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.UpdateUserRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.UserResponse'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: Update user (admin)
+      tags:
+      - Users
+  /api/v1/auth/change-password:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Old + new password
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.ChangePasswordRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: Change my password
+      tags:
+      - Auth
+  /api/v1/auth/login:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Credentials
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.LoginRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.AuthResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+      summary: Login
+      tags:
+      - Auth
+  /api/v1/auth/register:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Registration data
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.RegisterRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.AuthResponse'
+              type: object
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+      summary: Register a new account
+      tags:
+      - Auth
+  /api/v1/users/me:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.UserResponse'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Get my profile
+      tags:
+      - Users
+    put:
+      consumes:
+      - application/json
+      description: Self-service profile update. The role field is silently dropped
+        to prevent privilege escalation.
+      parameters:
+      - description: User data
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.UpdateUserRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.UserResponse'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Update my profile
+      tags:
+      - Users
+  /api/v1/users/me/photo:
+    delete:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.UserResponse'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Delete my photo
+      tags:
+      - Users
+  /api/v1/users/upload-photo:
+    post:
+      consumes:
+      - multipart/form-data
+      description: Uploads an image to temp/users/. Returns the object key — pass
+        it as `photo` to PUT /users/me (or admin Create/Update) to attach it to a
+        user.
+      parameters:
+      - description: Image file (jpeg/png/webp, max 5MB)
+        in: formData
+        name: image
+        required: true
+        type: file
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.UploadResponse'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: Upload user photo
+      tags:
+      - Users
+schemes:
+- http
+- https
+securityDefinitions:
+  BearerAuth:
+    description: Type "Bearer {token}" to authenticate.
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"
