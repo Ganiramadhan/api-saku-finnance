@@ -20,3 +20,7 @@ type ChangePasswordRequest struct {
 	CurrentPassword string `json:"current_password" validate:"required" example:"oldSecret123"`
 	NewPassword     string `json:"new_password" validate:"required,min=6,max=72,nefield=CurrentPassword" example:"newSecret123"`
 }
+
+type GoogleLoginRequest struct {
+	IDToken string `json:"id_token" validate:"required" example:"eyJhbGciOi..."`
+}

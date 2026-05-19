@@ -83,3 +83,24 @@ func (h *Handler) ChangePassword(c *fiber.Ctx) error {
 	}
 	return httpx.OK(c, constants.MsgChangePassword, nil)
 }
+
+// GoogleLogin godoc
+// @Summary   Login with Google
+// @Tags      Auth
+// @Accept    json
+// @Produce   json
+// @Param     request  body  dto.GoogleLoginRequest  true  "Google ID token"
+// @Success   200  {object}  dto.APIResponse{data=dto.AuthResponse}
+// @Failure   401  {object}  dto.APIResponse
+// @Router    /api/v1/auth/google [post]
+func (h *Handler) GoogleLogin(c *fiber.Ctx) error {
+	var req dto.GoogleLoginRequest
+	if err := httpx.Bind(c, h.validator, &req); err != nil {
+		return err
+	}
+	resp, err := h.service.GoogleLogin(c.Context(), req)
+	if err != nil {
+		return err
+	}
+	return httpx.OK(c, constants.MsgLogin, resp)
+}

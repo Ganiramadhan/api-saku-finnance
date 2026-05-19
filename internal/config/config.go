@@ -17,6 +17,9 @@ type Config struct {
 	JWT      JWTConfig
 	CORS     CORSConfig
 	S3       S3Config
+	Claude   ClaudeConfig
+	Google   GoogleConfig
+	Midtrans MidtransConfig
 }
 
 type AppConfig struct {
@@ -60,6 +63,21 @@ type S3Config struct {
 	Endpoint     string
 	Bucket       string
 	UsePathStyle bool
+}
+
+type ClaudeConfig struct {
+	APIKey string
+	Model  string
+}
+
+type GoogleConfig struct {
+	ClientID string
+}
+
+type MidtransConfig struct {
+	ServerKey    string
+	ClientKey    string
+	IsProduction bool
 }
 
 func Load() *Config {
@@ -110,6 +128,18 @@ func Load() *Config {
 			Bucket:       mustGetEnv("AWS_BUCKET"),
 			UsePathStyle: os.Getenv("AWS_USE_PATH_STYLE_ENDPOINT") == "true",
 		},
+		Claude: ClaudeConfig{
+			APIKey: mustGetEnv("CLAUDE_API_KEY"),
+			Model:  getEnvOrDefault("CLAUDE_MODEL", "claude-sonnet-4-5"),
+		},
+		Google: GoogleConfig{
+			ClientID: os.Getenv("GOOGLE_CLIENT_ID"),
+		},
+		Midtrans: MidtransConfig{
+			ServerKey:    os.Getenv("MIDTRANS_SERVER_KEY"),
+			ClientKey:    os.Getenv("MIDTRANS_CLIENT_KEY"),
+			IsProduction: os.Getenv("MIDTRANS_IS_PROD") == "true",
+		},
 	}
 }
 
@@ -144,6 +174,13 @@ func findProjectRoot() string {
 		}
 		dir = parent
 	}
+}
+
+func getEnvOrDefault(key, defaultVal string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return defaultVal
 }
 
 func mustGetEnv(key string) string {

@@ -35,7 +35,15 @@ func AuthRequired(j *jwt.Manager) fiber.Handler {
 }
 
 func RequireAdmin(c *fiber.Ctx) error {
-	if httpx.Role(c) != "admin" {
+	role := httpx.Role(c)
+	if role != "admin" && role != "super_admin" {
+		return fiber.NewError(http.StatusForbidden, constants.ErrForbidden)
+	}
+	return c.Next()
+}
+
+func RequireSuperAdmin(c *fiber.Ctx) error {
+	if httpx.Role(c) != "super_admin" {
 		return fiber.NewError(http.StatusForbidden, constants.ErrForbidden)
 	}
 	return c.Next()

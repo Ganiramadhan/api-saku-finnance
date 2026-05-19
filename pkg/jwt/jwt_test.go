@@ -68,8 +68,6 @@ func TestManager_Validate_RejectsExpired(t *testing.T) {
 }
 
 func TestManager_Validate_RejectsNoneAlg(t *testing.T) {
-	// Forge a token signed with the "none" alg. It must be rejected by
-	// our validator (which only accepts HS256).
 	claims := Claims{
 		UserID: uuid.New(),
 		Email:  "evil@example.com",

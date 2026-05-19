@@ -77,10 +77,16 @@ func (s *service) Create(ctx context.Context, req dto.CreateUserRequest) (*dto.U
 	if role == "" {
 		role = "user"
 	}
+	status := req.Status
+	if status == "" {
+		status = "active"
+	}
 	u := domain.User{
 		ID:       uuid.New(),
 		Name:     req.Name,
 		Email:    req.Email,
+		Phone:    req.Phone,
+		Status:   status,
 		Photo:    req.Photo,
 		Password: string(hashed),
 		Role:     role,
@@ -132,6 +138,12 @@ func (s *service) Update(ctx context.Context, id uuid.UUID, req dto.UpdateUserRe
 	}
 	if req.Role != "" {
 		u.Role = req.Role
+	}
+	if req.Phone != "" {
+		u.Phone = req.Phone
+	}
+	if req.Status != "" {
+		u.Status = req.Status
 	}
 
 	oldPhoto := u.Photo
@@ -202,7 +214,17 @@ func (s *service) DeletePhoto(ctx context.Context, id uuid.UUID) (*dto.UserRespo
 }
 
 func (s *service) toResponse(ctx context.Context, u domain.User) dto.UserResponse {
-	resp := dto.UserResponse{ID: u.ID, Name: u.Name, Email: u.Email, Role: u.Role, Photo: u.Photo}
+	resp := dto.UserResponse{
+		ID:        u.ID,
+		Name:      u.Name,
+		Email:     u.Email,
+		Role:      u.Role,
+		Phone:     u.Phone,
+		Status:    u.Status,
+		Photo:     u.Photo,
+		CreatedAt: u.CreatedAt,
+		UpdatedAt: u.UpdatedAt,
+	}
 	if u.Photo != "" {
 		if url, err := s.storage.PresignedURL(ctx, u.Photo, photoURLTTL); err == nil {
 			resp.PhotoURL = url

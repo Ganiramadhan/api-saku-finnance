@@ -1,250 +1,427 @@
-# Starter Go API
+# SAKU Finance API
 
-A minimal, production-ready Go API starter built with **Fiber**, **GORM (PostgreSQL)**, **JWT**, **Redis**, and **S3-compatible object storage** (MinIO out of the box). Designed as a clean foundation you can copy, rename, and grow into a real product without ripping out half the code.
+AI-powered personal finance API platform built with Go, designed for modern financial tracking, intelligent transaction management, and scalable SaaS architecture.
 
-## Highlights
+SAKU helps users manage personal finances through manual transactions, AI-powered financial insights, receipt scanning, subscription reminders, budgeting, split bills, and conversational finance management using NLP and AI assistants.
 
-- **Fiber v2** HTTP server with `cors`, `recover`, `requestid`, and structured request logging.
-- **GORM + PostgreSQL** with connection pooling, soft deletes, prepared statements, and idempotent auto-migration.
-- **JWT (HS256)** auth with role-based authorization (`user` / `admin`) and explicit valid-method allow-listing.
-- **Validator** wrapper that returns human-friendly field errors via a centralized error handler.
-- **Redis** cache with a no-op fallback so local dev never blocks on Redis being down.
-- **S3 / MinIO storage** for user photo uploads — DB stores raw object keys, API responses include short-lived **presigned URLs**.
-- **Swagger UI** auto-generated from handler annotations (`/swagger/index.html`).
-- **Vertical-slice modules** (`handler / service / repository`) wired in [internal/app/app.go](internal/app/app.go).
-- **Multi-stage distroless Docker image** running as non-root.
-- **Makefile** + **docker-compose** for one-command local boots.
-- **Unit tests** for the validator, JWT manager, HTTP helpers, middleware, and the user service (with in-memory fakes for repo + storage).
-- Standard response envelope: `{ status, code, message, data, meta }`.
+---
 
-## Requirements
+## Overview
 
-- Go **1.25+**
-- PostgreSQL **14+**
-- Redis **7+** (optional)
-- MinIO or any S3-compatible store (local dev uses MinIO via Docker Compose)
-- `make` (the `swag` and `air` CLIs are auto-installed by their make targets)
+SAKU is more than a simple expense tracker.
 
-## Quick start
+It combines:
+- Personal finance management
+- AI-powered transaction processing
+- Conversational finance assistant
+- OCR receipt scanning
+- Subscription & billing reminders
+- Goal-based budgeting
+- Smart financial insights
 
-### Option A — full stack in Docker
+into a single scalable backend platform.
 
-```bash
-cp envs/.env.example envs/.env
-make up                 # postgres + redis + minio + minio-init + api
-make logs               # follow logs
-```
+Built with:
+- Go (Golang)
+- Fiber
+- PostgreSQL
+- Redis
+- RabbitMQ
+- MinIO
+- Claude AI (Anthropic)
+- Docker
 
-The API is reachable on `http://localhost:4000` and Swagger on `http://localhost:4000/swagger/index.html`.
+---
 
-### Option B — run the API locally, dependencies in Docker
+# Core Features
 
-```bash
-cp envs/.env.example envs/.env
-make up-deps            # postgres + redis + minio + bucket initializer
-make swag               # generate Swagger docs (first run only)
-make tidy
-make run                # or `make dev` for hot reload via air
-```
+## Smart Transaction Management
 
-| URL | Purpose |
-| --- | --- |
-| `http://localhost:4000/health` | Liveness + dependency status |
-| `http://localhost:4000/swagger/index.html` | Interactive API docs |
-| `http://localhost:9001` | MinIO console (default `minioadmin` / `minioadmin`) |
+Track:
+- Income
+- Expenses
+- Transfers
+- Recurring payments
 
-## Project layout
+Transactions can be created through:
+- Manual input
+- AI/NLP chat commands
+- OCR receipt scanning
 
-```
-starter-go/
-├── cmd/api/                     # Process entrypoint + Swagger metadata
-├── docker/Dockerfile            # Multi-stage distroless build
-├── docker-compose.yml           # postgres + redis + minio + minio-init + api
-├── docs/                        # Generated Swagger artefacts (git-ignored content)
-├── envs/.env.example            # Sample configuration
-├── internal/
-│   ├── app/                     # Composition root (App struct, init*, Run, graceful shutdown)
-│   ├── config/                  # Env-driven config loader (fail-fast)
-│   ├── constants/               # User-facing message + error strings
-│   ├── domain/                  # Entities + sentinel errors
-│   ├── dto/                     # Request/response payloads + envelope
-│   ├── middleware/              # Auth, role guard, central error handler
-│   ├── modules/                 # Vertical slices: handler · service · repository
-│   │   ├── auth/
-│   │   └── user/
-│   ├── platform/                # External integrations
-│   │   ├── cache/               # Redis + Noop fallback
-│   │   ├── database/            # Postgres connect + migration
-│   │   └── storage/             # S3 / MinIO with presigned URLs
-│   └── routes/                  # Route registration
-├── pkg/                         # Small, reusable helpers
-│   ├── httpx/                   # Bind / response writers / locals
-│   ├── jwt/                     # Token sign + parse
-│   └── validator/               # Validator wrapper with friendly errors
-├── Makefile
-└── README.md
-```
+Examples:
+- "I spent 75k for coffee at Starbucks"
+- "Add internet bill 350k for this month"
 
-## Endpoints
+The AI automatically extracts:
+- Amount
+- Merchant
+- Category
+- Transaction type
+- Date
 
-All endpoints are documented in Swagger. The summary below lists the surface area.
+Before saving, every AI-generated transaction goes through a preview & confirmation flow to avoid incorrect data.
 
-### Public
+---
 
-| Method | Path | Description |
-| --- | --- | --- |
-| `POST` | `/api/v1/auth/login` | Email + password login |
-| `POST` | `/api/v1/auth/register` | Self-registration (role = `user`) |
-| `GET`  | `/health` | Database + cache status |
-| `GET`  | `/swagger/*` | Swagger UI |
+## AI Financial Assistant (Claude AI)
 
-### Authenticated user
+Powered by Anthropic Claude.
 
-| Method | Path | Description |
-| --- | --- | --- |
-| `POST`   | `/api/v1/auth/change-password` | Change my password |
-| `GET`    | `/api/v1/users/me`             | Current profile |
-| `PUT`    | `/api/v1/users/me`             | Update my profile (role is silently dropped) |
-| `POST`   | `/api/v1/users/upload-photo`   | Upload an image to `temp/users/`, returns the object key |
-| `DELETE` | `/api/v1/users/me/photo`       | Detach + delete my photo |
+Users can:
+- Ask financial questions
+- Generate spending summaries
+- Analyze monthly expenses
+- Receive budgeting insights
+- Detect unusual spending habits
+- Get financial recommendations
 
-### Admin (`role=admin`)
+Examples:
+- "How much did I spend on food this month?"
+- "Summarize my expenses this week"
+- "Why is my spending higher this month?"
+- "Give me saving suggestions"
 
-| Method | Path | Description |
-| --- | --- | --- |
-| `GET`    | `/api/v1/admin/users`        | List users (page/limit/search) |
-| `GET`    | `/api/v1/admin/users/{id}`   | Get user by ID |
-| `POST`   | `/api/v1/admin/users`        | Create user |
-| `PUT`    | `/api/v1/admin/users/{id}`   | Update user |
-| `DELETE` | `/api/v1/admin/users/{id}`   | Soft-delete user (and remove photo) |
+---
 
-### Photo upload flow
+## NLP Transaction Creation
 
-The photo flow uses a **two-step "promote on save"** pattern so we never write the user record until the file is persisted, and we never leak orphan files when the DB transaction fails.
+Users can create transactions naturally through chat.
 
-1. `POST /api/v1/users/upload-photo` — multipart `image` field (jpeg / png / webp, ≤ 5 MB). Returns:
-   ```json
-   {
-     "data": {
-       "image": "temp/users/avatar-1a2b3c4d.png",
-       "preview_url": "https://minio.local/starter/temp/users/avatar-1a2b3c4d.png?X-Amz-...",
-       "preview_expires_in": 604800
-     }
-   }
-   ```
-2. `PUT /api/v1/users/me` (or admin Create / Update) with `"photo": "temp/users/avatar-1a2b3c4d.png"`.
-   The service moves the object to `users/<user-id>/avatar-1a2b3c4d.png`, persists the new key, deletes the previous photo (if any) from storage, **and rolls back the moved object if the DB write fails**.
-3. Responses always include `photo` (raw key for storage) and `photo_url` (a 24-hour presigned GET URL the frontend can render directly).
+Examples:
+- "Paid Netflix subscription 169k"
+- "Bought groceries 250k at Alfamart"
+- "Salary received 8 million"
 
-## Response envelope
+The AI converts natural language into structured transactions automatically.
 
-Every JSON response uses the same envelope so clients can rely on a single shape:
+---
 
-```json
-{
-  "status": "success",
-  "code": 200,
-  "message": "Successfully retrieved user",
-  "data": { },
-  "meta": {
-    "page": 1, "limit": 10, "total": 42,
-    "total_pages": 5, "has_next": true, "has_previous": false
-  }
-}
-```
+## OCR Receipt Scanner
 
-Validation failures return `422` with field-level details under `data.errors[]`.
+Upload or scan receipts and the system will:
+- Extract text using OCR
+- Detect merchant name
+- Detect total amount
+- Categorize transaction
+- Generate structured transaction preview
 
-## Configuration
+Supported flow:
+1. Upload receipt image
+2. OCR + AI processing
+3. Preview extracted data
+4. User confirmation
+5. Save transaction
 
-All runtime configuration is driven by environment variables — see [envs/.env.example](envs/.env.example).
+This reduces manual finance tracking friction significantly.
 
-| Variable | Notes |
-| --- | --- |
-| `APP_PORT`, `APP_ENV`, `CORS_ORIGINS` | HTTP server basics |
-| `DB_*` | Postgres host, credentials, pool tuning |
-| `REDIS_*` | Optional — when unreachable the app falls back to a no-op cache |
-| `JWT_SECRET`, `JWT_TTL_HOURS` | HS256 signing secret + token lifetime |
-| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | Object-storage credentials |
-| `AWS_DEFAULT_REGION` | e.g. `us-east-1` (required even for MinIO) |
-| `AWS_ENDPOINT` | Leave empty for real AWS; set to `http://minio:9000` for MinIO |
-| `AWS_BUCKET` | Bucket name; auto-created on boot if missing |
-| `AWS_USE_PATH_STYLE_ENDPOINT` | `true` for MinIO, `false` for AWS |
+---
 
-> When running with `make up` (full Compose stack), the API container automatically overrides `DB_HOST`, `REDIS_HOST`, and `AWS_ENDPOINT` to the in-network service names — your `envs/.env` can keep the localhost values used by Option B.
+## Wallet Management
 
-## Adding a new module
+Supports multiple wallets per user:
+- Cash
+- Bank accounts
+- E-wallets
+- Digital wallets
+- Savings accounts
 
-Each domain lives in its own folder under `internal/modules/<name>/` with three files:
+Each wallet includes:
+- Balance tracking
+- Transaction history
+- Currency support
+- Analytics integration
 
-```
-internal/modules/<name>/
-  ├── repository.go   # GORM access — returns domain entities
-  ├── service.go      # Business rules + DTO mapping
-  └── handler.go      # Fiber handlers + Swagger annotations
-```
+---
 
-Then wire it in [internal/app/app.go](internal/app/app.go) and register routes in [internal/routes/routes.go](internal/routes/routes.go). New entities should be appended to [internal/platform/database/migration.go](internal/platform/database/migration.go) so `AutoMigrate` picks them up.
+## Budget & Saving Goals
 
-## Testing
+Users can create:
+- Monthly budgets
+- Spending limits
+- Saving goals
 
-Unit tests cover the framework-agnostic logic — no Postgres, Redis, or S3 required.
+Examples:
+- House down payment
+- Emergency fund
+- Vacation target
+- Vehicle purchase
 
-```bash
-make test         # go test -race -count=1 ./...
-make cover        # writes coverage.html
-```
+Features:
+- Budget progress tracking
+- Spending alerts
+- Goal analytics
+- Financial milestone monitoring
 
-| Package | What it covers |
-| --- | --- |
-| [internal/dto](internal/dto/response_test.go) | Pagination meta math (edge cases: empty, exact multiples, zero limit). |
-| [internal/middleware](internal/middleware/middleware_test.go) | `AuthRequired` (missing header / wrong prefix / empty token / invalid / valid), `RequireAdmin`, and `ErrorHandler` mapping for every domain sentinel + Fiber + unknown errors. |
-| [internal/modules/user](internal/modules/user/service_test.go) | `Service` happy paths plus the "promote on save" photo flow — including **rollback** of the moved S3 object when the DB write fails (the original bug we hardened against). Uses in-memory `Repository` + `Storage` fakes. |
-| [pkg/httpx](pkg/httpx/httpx_test.go) | `ParseUUID`, `Bind` (valid / malformed JSON / validation error), and `UserID`/`Role` locals. |
-| [pkg/jwt](pkg/jwt/jwt_test.go) | Round-trip generate→validate, wrong secret, expired token, malformed input, and **explicit rejection of `alg=none` tokens** (algorithm-confusion guard). |
-| [pkg/validator](pkg/validator/validator_test.go) | Field-level errors keyed by JSON tag and the human-friendly message map. |
+---
 
-Add new tests next to the file under test using the `_test.go` suffix; the suite stays hermetic so `go test ./...` runs in seconds without external services.
+## Upcoming Billing & Subscription Reminder
 
-## Make targets
+Track recurring bills and subscriptions:
+- Netflix
+- Spotify
+- VPS hosting
+- Internet bills
+- Electricity
+- SaaS subscriptions
 
-Run `make help` for the full list with descriptions. Highlights:
+Features:
+- Upcoming payment reminders
+- Due date tracking
+- Recurring billing management
+- Notification scheduling
 
-| Target | Description |
-| --- | --- |
-| `make tidy` | `go mod tidy` |
-| `make swag` | Generate Swagger docs into `docs/` (auto-installs `swag` CLI) |
-| `make build` | Build the static binary into `bin/starter-go` (with `-ldflags` version) |
-| `make run` | Run the API locally |
-| `make dev` | Hot reload via [air](https://github.com/air-verse/air) (auto-installed) |
-| `make test` / `make cover` | Run tests with `-race` (and HTML coverage) |
-| `make vet` / `make fmt` / `make lint` | Static analysis |
-| `make docker-build` / `make docker-run` | Build & run the production image |
-| `make up` / `make up-deps` / `make down` / `make down-volumes` / `make logs` / `make ps` | Compose lifecycle |
-| `make clean` | Remove build artefacts |
+---
 
-## Docker
+## Split Bill Management
 
-The image is built in two stages:
+Supports:
+- Manual split bill creation
+- Receipt-based split bill generation
 
-1. **`golang:1.25-alpine`** with BuildKit cache mounts for module downloads and the build cache.
-2. **`gcr.io/distroless/static-debian12:nonroot`** — no shell, no package manager, runs as `nonroot`. The final image only contains the static binary plus `envs/`.
+Features:
+- Equal split
+- Custom split
+- Participant tracking
+- Shared expense calculation
+
+Perfect for:
+- Trips
+- Group dining
+- Team expenses
+- Shared subscriptions
+
+---
+
+# Tech Stack
+
+## Backend
+- Go (Golang)
+- Fiber
+- GORM
+- PostgreSQL
+
+## Infrastructure
+- Redis
+- RabbitMQ
+- MinIO
+- Docker
+- Docker Compose
+
+## AI & OCR
+- Claude AI (Anthropic)
+- OCR Processing Pipeline
+
+## Payment Gateway
+- Midtrans
+
+## Storage
+- S3-compatible object storage via MinIO
+
+---
+
+# Architecture
 
 ```bash
-make docker-build       # build the image
-make up                 # bring up postgres + redis + minio + bucket initializer + API
+Client Apps
+   │
+   ├── Web App
+   ├── Mobile App
+   └── AI Chat Interface
+   │
+   ▼
+SAKU API Gateway
+   │
+   ├── Authentication
+   ├── Wallet Service
+   ├── Transaction Service
+   ├── Budget Service
+   ├── Billing Service
+   ├── AI Service
+   ├── OCR Service
+   └── Split Bill Service
+   │
+   ▼
+Infrastructure Layer
+   ├── PostgreSQL
+   ├── Redis
+   ├── RabbitMQ
+   ├── MinIO
+   └── Claude AI
 ```
 
-## Security notes
+---
 
-- Never commit a real `envs/.env` — it is git- and docker-ignored.
-- Rotate `JWT_SECRET` per environment; never reuse the example value in production.
-- JWT validation is locked to `HS256` via `WithValidMethods` to prevent algorithm confusion attacks.
-- MinIO defaults (`minioadmin` / `minioadmin`) are for local dev only — change them before exposing the service.
-- The `UpdateMe` handler intentionally drops `role` from the request body to prevent self-elevation.
-- Uploads are bound by `MaxUploadSize` (5 MB) and a content-type allow-list (`jpeg`/`png`/`webp`); tighten further as needed.
-- Auth middleware requires the `Bearer ` prefix and rejects empty tokens.
+# Project Structure
 
-## License
+```bash
+api/
+├── cmd/api
+├── docker
+├── docs
+├── envs
+├── internal
+│   ├── app
+│   ├── config
+│   ├── constants
+│   ├── domain
+│   ├── dto
+│   ├── middleware
+│   ├── modules
+│   │   ├── ai
+│   │   ├── ailog
+│   │   ├── auth
+│   │   ├── budget
+│   │   ├── category
+│   │   ├── savinggoal
+│   │   ├── splitbill
+│   │   ├── subscription
+│   │   ├── transaction
+│   │   ├── user
+│   │   └── wallet
+│   ├── platform
+│   │   ├── ai
+│   │   ├── cache
+│   │   ├── database
+│   │   ├── messaging
+│   │   ├── payment
+│   │   └── storage
+│   └── routes
+└── pkg
+```
 
-MIT — use it, fork it, ship it.
+---
+
+# Infrastructure Components
+
+## PostgreSQL
+Primary relational database used for:
+- Transactions
+- Wallets
+- Budgets
+- Users
+- Billing
+- Split bills
+
+## Redis
+Used for:
+- Caching
+- Session storage
+- Rate limiting
+- Queue buffering
+
+## RabbitMQ
+Used for:
+- AI processing queue
+- OCR jobs
+- Notification jobs
+- Background processing
+
+## MinIO
+Used for:
+- Receipt storage
+- User uploads
+- AI processing assets
+- Object storage
+
+Compatible with Amazon S3 APIs.
+
+---
+
+# API Documentation
+
+Swagger documentation available at:
+
+```bash
+/api/swagger/index.html
+```
+
+---
+
+# Security
+
+Features:
+- JWT authentication
+- Role-based authorization
+- Secure file uploads
+- Request validation
+- Rate limiting
+- Environment-based configuration
+- AI processing isolation
+- Secure object storage
+
+---
+
+# Docker Support
+
+Run full infrastructure locally using Docker Compose.
+
+Services included:
+- API
+- PostgreSQL
+- Redis
+- RabbitMQ
+- MinIO
+
+---
+
+# Environment Variables
+
+```env
+APP_ENV=development
+APP_PORT=4000
+
+DB_HOST=postgres
+DB_PORT=5432
+DB_NAME=saku
+DB_USER=postgres
+DB_PASSWORD=postgres
+
+REDIS_HOST=redis
+REDIS_PORT=6379
+
+RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+
+MINIO_ENDPOINT=minio:9000
+MINIO_ACCESS_KEY=minioadmin
+MINIO_SECRET_KEY=minioadmin
+MINIO_BUCKET=saku
+
+ANTHROPIC_API_KEY=your_claude_api_key
+
+MIDTRANS_SERVER_KEY=your_midtrans_server_key
+MIDTRANS_CLIENT_KEY=your_midtrans_client_key
+
+JWT_SECRET=super-secret-key
+```
+
+---
+
+# Development Philosophy
+
+SAKU is designed with:
+- Clean Architecture principles
+- Vertical Slice Architecture
+- Modular domain separation
+- Scalable async processing
+- Production-ready infrastructure
+- AI-first financial experience
+
+---
+
+# Future Roadmap
+
+Planned features:
+- Investment tracking
+- AI anomaly detection
+- Financial forecasting
+- Bank synchronization
+- Multi-currency support
+- Team/shared wallets
+- Push notifications
+- Advanced analytics dashboard
+
+---
+
+# License
+
+MIT License.

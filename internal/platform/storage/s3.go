@@ -100,6 +100,39 @@ func (s *S3Storage) Upload(ctx context.Context, file *multipart.FileHeader, fold
 	return objectKey, nil
 }
 
+func (s *S3Storage) UploadBytes(ctx context.Context, data []byte, contentType, folder, ext string) (string, error) {
+	if len(data) == 0 {
+		return "", fmt.Errorf("upload bytes: empty payload")
+	}
+	if contentType == "" {
+		contentType = http.DetectContentType(data)
+	}
+	if ext == "" {
+		switch contentType {
+		case "image/jpeg":
+			ext = ".jpg"
+		case "image/png":
+			ext = ".png"
+		case "image/webp":
+			ext = ".webp"
+		case "application/pdf":
+			ext = ".pdf"
+		default:
+			ext = ".bin"
+		}
+	}
+	objectKey := fmt.Sprintf("%s/%s%s", strings.TrimSuffix(folder, "/"), uuid.New().String(), ext)
+	if _, err := s.client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket:      aws.String(s.bucket),
+		Key:         aws.String(objectKey),
+		Body:        bytes.NewReader(data),
+		ContentType: aws.String(contentType),
+	}); err != nil {
+		return "", fmt.Errorf("put object: %w", err)
+	}
+	return objectKey, nil
+}
+
 func (s *S3Storage) PresignedURL(ctx context.Context, objectKey string, ttl time.Duration) (string, error) {
 	if objectKey == "" {
 		return "", nil

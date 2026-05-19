@@ -11,13 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// ErrorHandler is the central Fiber error handler. It maps:
-//   - *fiber.Error          -> the embedded status & message
-//   - validator failures    -> 422 with field-level details
-//   - domain.Err* sentinels -> appropriate HTTP status
-//   - everything else       -> 500
-//
-// All responses use the standard APIResponse envelope.
 func ErrorHandler(c *fiber.Ctx, err error) error {
 	code := fiber.StatusInternalServerError
 	message := "Internal server error"

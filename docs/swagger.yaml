@@ -1,5 +1,38 @@
 basePath: /
 definitions:
+  github_com_ganiramadhan_starter-go_internal_dto.AIProcessingLogResponse:
+    properties:
+      attachment_id:
+        type: string
+      confidence_score:
+        type: number
+      created_at:
+        type: string
+      error_message:
+        type: string
+      extracted_amount:
+        type: number
+      extracted_category:
+        type: string
+      extracted_merchant:
+        type: string
+      feature:
+        type: string
+      id:
+        type: string
+      latency_ms:
+        type: integer
+      model_version:
+        type: string
+      raw_response:
+        type: object
+      status:
+        type: string
+      updated_at:
+        type: string
+      user_id:
+        type: string
+    type: object
   github_com_ganiramadhan_starter-go_internal_dto.APIResponse:
     properties:
       code:
@@ -15,6 +48,27 @@ definitions:
         example: success
         type: string
     type: object
+  github_com_ganiramadhan_starter-go_internal_dto.AttachmentResponse:
+    properties:
+      created_at:
+        type: string
+      file_type:
+        type: string
+      file_url:
+        type: string
+      id:
+        type: string
+      ocr_text:
+        type: string
+      preview_url:
+        type: string
+      transaction_id:
+        type: string
+      uploaded_from:
+        type: string
+      user_id:
+        type: string
+    type: object
   github_com_ganiramadhan_starter-go_internal_dto.AuthResponse:
     properties:
       token:
@@ -22,6 +76,97 @@ definitions:
         type: string
       user:
         $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.UserResponse'
+    type: object
+  github_com_ganiramadhan_starter-go_internal_dto.BudgetResponse:
+    properties:
+      category_id:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: string
+      limit_amount:
+        type: number
+      period:
+        type: string
+      updated_at:
+        type: string
+      user_id:
+        type: string
+      wallet_id:
+        type: string
+    type: object
+  github_com_ganiramadhan_starter-go_internal_dto.BudgetSuggestion:
+    properties:
+      category:
+        example: Food & Beverage
+        type: string
+      limit_amount:
+        example: 1500000
+        type: number
+      period:
+        example: monthly
+        type: string
+      reason:
+        example: 'Average spend over last 3 months: 1.4M'
+        type: string
+    type: object
+  github_com_ganiramadhan_starter-go_internal_dto.CategorizeRequest:
+    properties:
+      text:
+        example: Starbucks Coffee Rp 87.500
+        minLength: 3
+        type: string
+      user_categories:
+        example:
+        - Food
+        - Shopping
+        - Transport
+        items:
+          type: string
+        type: array
+    required:
+    - text
+    type: object
+  github_com_ganiramadhan_starter-go_internal_dto.CategorizeResponse:
+    properties:
+      amount:
+        example: 87500
+        type: number
+      category:
+        example: Food & Beverage
+        type: string
+      confidence:
+        example: 0.95
+        type: number
+      merchant_name:
+        example: Starbucks
+        type: string
+      needs_review:
+        example: false
+        type: boolean
+      raw_response:
+        type: object
+      type:
+        example: expense
+        type: string
+    type: object
+  github_com_ganiramadhan_starter-go_internal_dto.CategoryResponse:
+    properties:
+      color:
+        type: string
+      icon:
+        type: string
+      id:
+        type: string
+      is_system:
+        type: boolean
+      name:
+        type: string
+      type:
+        type: string
+      user_id:
+        type: string
     type: object
   github_com_ganiramadhan_starter-go_internal_dto.ChangePasswordRequest:
     properties:
@@ -36,6 +181,154 @@ definitions:
     required:
     - current_password
     - new_password
+    type: object
+  github_com_ganiramadhan_starter-go_internal_dto.ChatRequest:
+    properties:
+      include_context:
+        example: true
+        type: boolean
+      message:
+        example: Berapa pengeluaran terbesar saya bulan ini?
+        maxLength: 2000
+        minLength: 2
+        type: string
+    required:
+    - message
+    type: object
+  github_com_ganiramadhan_starter-go_internal_dto.ChatResponse:
+    properties:
+      reply:
+        type: string
+    type: object
+  github_com_ganiramadhan_starter-go_internal_dto.CreateAILogRequest:
+    properties:
+      attachment_id:
+        type: string
+      confidence_score:
+        maximum: 1
+        minimum: 0
+        type: number
+      error_message:
+        maxLength: 2000
+        type: string
+      extracted_amount:
+        minimum: 0
+        type: number
+      extracted_category:
+        maxLength: 120
+        type: string
+      extracted_merchant:
+        maxLength: 255
+        type: string
+      feature:
+        enum:
+        - categorize
+        - scan_receipt
+        - insights
+        - suggest_budget
+        - chat
+        type: string
+      latency_ms:
+        minimum: 0
+        type: integer
+      model_version:
+        maxLength: 64
+        type: string
+      raw_response:
+        type: string
+      status:
+        enum:
+        - pending
+        - success
+        - failed
+        type: string
+    required:
+    - feature
+    - status
+    type: object
+  github_com_ganiramadhan_starter-go_internal_dto.CreateBudgetRequest:
+    properties:
+      category_id:
+        type: string
+      limit_amount:
+        type: number
+      period:
+        enum:
+        - daily
+        - weekly
+        - monthly
+        type: string
+      wallet_id:
+        type: string
+    required:
+    - category_id
+    - limit_amount
+    - period
+    - wallet_id
+    type: object
+  github_com_ganiramadhan_starter-go_internal_dto.CreateCategoryRequest:
+    properties:
+      color:
+        example: '#FF8800'
+        maxLength: 16
+        type: string
+      icon:
+        example: utensils
+        maxLength: 64
+        type: string
+      name:
+        example: Food
+        maxLength: 120
+        minLength: 2
+        type: string
+      type:
+        enum:
+        - income
+        - expense
+        example: expense
+        type: string
+    required:
+    - name
+    - type
+    type: object
+  github_com_ganiramadhan_starter-go_internal_dto.CreateTransactionRequest:
+    properties:
+      amount:
+        type: number
+      category_id:
+        type: string
+      confidence_score:
+        maximum: 1
+        minimum: 0
+        type: number
+      description:
+        maxLength: 2000
+        type: string
+      merchant_name:
+        maxLength: 255
+        type: string
+      source:
+        enum:
+        - manual
+        - ai_ocr
+        - import
+        - api
+        type: string
+      transaction_date:
+        type: string
+      type:
+        enum:
+        - income
+        - expense
+        type: string
+      wallet_id:
+        type: string
+    required:
+    - amount
+    - category_id
+    - transaction_date
+    - type
+    - wallet_id
     type: object
   github_com_ganiramadhan_starter-go_internal_dto.CreateUserRequest:
     properties:
@@ -65,6 +358,91 @@ definitions:
     - email
     - name
     - password
+    type: object
+  github_com_ganiramadhan_starter-go_internal_dto.CreateWalletRequest:
+    properties:
+      balance:
+        example: 1500000
+        minimum: 0
+        type: number
+      currency:
+        example: IDR
+        type: string
+      is_default:
+        example: false
+        type: boolean
+      name:
+        example: BCA Tabungan
+        maxLength: 120
+        minLength: 2
+        type: string
+      type:
+        enum:
+        - personal
+        - business
+        - shared
+        example: personal
+        type: string
+    required:
+    - name
+    - type
+    type: object
+  github_com_ganiramadhan_starter-go_internal_dto.InsightsRequest:
+    properties:
+      from:
+        example: "2026-04-01"
+        type: string
+      limit:
+        example: 100
+        maximum: 500
+        minimum: 1
+        type: integer
+      to:
+        example: "2026-04-30"
+        type: string
+    type: object
+  github_com_ganiramadhan_starter-go_internal_dto.InsightsResponse:
+    properties:
+      anomalies:
+        items:
+          type: string
+        type: array
+      health_score:
+        example: 72
+        type: integer
+      period:
+        example: 2026-04-01 to 2026-04-30
+        type: string
+      raw_response:
+        type: object
+      recommendations:
+        items:
+          type: string
+        type: array
+      summary:
+        example: You spent 4.2M this month, 18% above last month.
+        type: string
+      top_categories:
+        example:
+        - Food
+        - Transport
+        - Shopping
+        items:
+          type: string
+        type: array
+      total_expense:
+        example: 4250000
+        type: number
+      total_income:
+        example: 8000000
+        type: number
+    type: object
+  github_com_ganiramadhan_starter-go_internal_dto.LinkAttachmentRequest:
+    properties:
+      transaction_id:
+        type: string
+    required:
+    - transaction_id
     type: object
   github_com_ganiramadhan_starter-go_internal_dto.LoginRequest:
     properties:
@@ -119,6 +497,155 @@ definitions:
     - name
     - password
     type: object
+  github_com_ganiramadhan_starter-go_internal_dto.ScanReceiptRequest:
+    properties:
+      image_base64:
+        example: iVBORw0KGgoAAAANSUhEUgAA...
+        type: string
+      media_type:
+        enum:
+        - image/jpeg
+        - image/png
+        - image/webp
+        example: image/jpeg
+        type: string
+      user_categories:
+        items:
+          type: string
+        type: array
+    required:
+    - image_base64
+    type: object
+  github_com_ganiramadhan_starter-go_internal_dto.ScanReceiptResponse:
+    properties:
+      amount:
+        example: 87500
+        type: number
+      category:
+        example: Food & Beverage
+        type: string
+      confidence:
+        example: 0.95
+        type: number
+      currency:
+        example: IDR
+        type: string
+      date:
+        example: "2026-05-12"
+        type: string
+      merchant_name:
+        example: Starbucks Sudirman
+        type: string
+      needs_review:
+        example: false
+        type: boolean
+      ocr_text:
+        type: string
+      raw_response:
+        type: object
+      type:
+        example: expense
+        type: string
+    type: object
+  github_com_ganiramadhan_starter-go_internal_dto.SuggestBudgetRequest:
+    properties:
+      months:
+        example: 3
+        maximum: 12
+        minimum: 1
+        type: integer
+      wallet_id:
+        type: string
+    type: object
+  github_com_ganiramadhan_starter-go_internal_dto.SuggestBudgetResponse:
+    properties:
+      notes:
+        type: string
+      raw_response:
+        type: object
+      suggestions:
+        items:
+          $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.BudgetSuggestion'
+        type: array
+    type: object
+  github_com_ganiramadhan_starter-go_internal_dto.TransactionResponse:
+    properties:
+      amount:
+        type: number
+      category_id:
+        type: string
+      confidence_score:
+        type: number
+      created_at:
+        type: string
+      description:
+        type: string
+      id:
+        type: string
+      merchant_name:
+        type: string
+      source:
+        type: string
+      transaction_date:
+        type: string
+      type:
+        type: string
+      updated_at:
+        type: string
+      wallet_id:
+        type: string
+    type: object
+  github_com_ganiramadhan_starter-go_internal_dto.UpdateBudgetRequest:
+    properties:
+      limit_amount:
+        type: number
+      period:
+        enum:
+        - daily
+        - weekly
+        - monthly
+        type: string
+    type: object
+  github_com_ganiramadhan_starter-go_internal_dto.UpdateCategoryRequest:
+    properties:
+      color:
+        maxLength: 16
+        type: string
+      icon:
+        maxLength: 64
+        type: string
+      name:
+        maxLength: 120
+        minLength: 2
+        type: string
+      type:
+        enum:
+        - income
+        - expense
+        type: string
+    type: object
+  github_com_ganiramadhan_starter-go_internal_dto.UpdateTransactionRequest:
+    properties:
+      amount:
+        type: number
+      category_id:
+        type: string
+      description:
+        maxLength: 2000
+        type: string
+      merchant_name:
+        maxLength: 255
+        type: string
+      transaction_date:
+        type: string
+      type:
+        enum:
+        - income
+        - expense
+        type: string
+      wallet_id:
+        type: string
+    type: object
   github_com_ganiramadhan_starter-go_internal_dto.UpdateUserRequest:
     properties:
       email:
@@ -142,6 +669,26 @@ definitions:
         - user
         - admin
         example: admin
+        type: string
+    type: object
+  github_com_ganiramadhan_starter-go_internal_dto.UpdateWalletRequest:
+    properties:
+      balance:
+        minimum: 0
+        type: number
+      currency:
+        type: string
+      is_default:
+        type: boolean
+      name:
+        maxLength: 120
+        minLength: 2
+        type: string
+      type:
+        enum:
+        - personal
+        - business
+        - shared
         type: string
     type: object
   github_com_ganiramadhan_starter-go_internal_dto.UploadResponse:
@@ -175,6 +722,27 @@ definitions:
         type: string
       role:
         example: user
+        type: string
+    type: object
+  github_com_ganiramadhan_starter-go_internal_dto.WalletResponse:
+    properties:
+      balance:
+        type: number
+      created_at:
+        type: string
+      currency:
+        type: string
+      id:
+        type: string
+      is_default:
+        type: boolean
+      name:
+        type: string
+      type:
+        type: string
+      updated_at:
+        type: string
+      user_id:
         type: string
     type: object
 host: localhost:4000
@@ -346,6 +914,417 @@ paths:
       summary: Update user (admin)
       tags:
       - Users
+  /api/v1/ai-logs:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.AIProcessingLogResponse'
+                  type: array
+              type: object
+      security:
+      - BearerAuth: []
+      summary: List my AI processing logs
+      tags:
+      - AI Logs
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: AI log payload
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.CreateAILogRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.AIProcessingLogResponse'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Record AI processing result
+      tags:
+      - AI Logs
+  /api/v1/ai-logs/attachment/{attachment_id}:
+    get:
+      parameters:
+      - description: Attachment UUID
+        in: path
+        name: attachment_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.AIProcessingLogResponse'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Get AI log for an attachment
+      tags:
+      - AI Logs
+  /api/v1/ai/categorize:
+    post:
+      consumes:
+      - application/json
+      description: Uses Claude Sonnet 4 to extract amount, merchant, category & type
+        from free-form text.
+      parameters:
+      - description: OCR text + optional user categories
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.CategorizeRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.CategorizeResponse'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: 'AI: categorize transaction from raw OCR text'
+      tags:
+      - AI
+  /api/v1/ai/chat:
+    post:
+      consumes:
+      - application/json
+      description: Free-form Q&A with optional 30-day transaction context attached.
+      parameters:
+      - description: User question
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.ChatRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.ChatResponse'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: 'AI: conversational finance assistant'
+      tags:
+      - AI
+  /api/v1/ai/insights:
+    post:
+      consumes:
+      - application/json
+      description: Aggregates the user's transactions over a date range and asks Claude
+        for a narrative summary, recommendations and anomalies.
+      parameters:
+      - description: Date range (defaults to last 30 days)
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.InsightsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.InsightsResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: 'AI: financial insights for the current user'
+      tags:
+      - AI
+  /api/v1/ai/scan-receipt:
+    post:
+      consumes:
+      - application/json
+      description: Sends a base64-encoded receipt image to Claude vision and extracts
+        structured fields.
+      parameters:
+      - description: Base64 image (jpeg/png/webp)
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.ScanReceiptRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.ScanReceiptResponse'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: 'AI: scan receipt image (vision)'
+      tags:
+      - AI
+  /api/v1/ai/suggest-budget:
+    post:
+      consumes:
+      - application/json
+      description: Uses recent expense history to suggest sensible monthly budget
+        caps for each category.
+      parameters:
+      - description: Window in months (default 3) + optional wallet filter
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.SuggestBudgetRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.SuggestBudgetResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: 'AI: recommend a monthly budget per category'
+      tags:
+      - AI
+  /api/v1/attachments:
+    get:
+      parameters:
+      - description: Filter by transaction
+        in: query
+        name: transaction_id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.AttachmentResponse'
+                  type: array
+              type: object
+      security:
+      - BearerAuth: []
+      summary: List attachments
+      tags:
+      - Attachments
+    post:
+      consumes:
+      - multipart/form-data
+      parameters:
+      - description: Receipt file (image / pdf)
+        in: formData
+        name: file
+        required: true
+        type: file
+      - description: image | pdf | screenshot
+        in: formData
+        name: file_type
+        type: string
+      - description: mobile | web | api
+        in: formData
+        name: uploaded_from
+        type: string
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.AttachmentResponse'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Upload an attachment
+      tags:
+      - Attachments
+  /api/v1/attachments/{id}:
+    delete:
+      parameters:
+      - description: Attachment UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: Delete attachment
+      tags:
+      - Attachments
+    get:
+      parameters:
+      - description: Attachment UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.AttachmentResponse'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Get attachment
+      tags:
+      - Attachments
+  /api/v1/attachments/{id}/link:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Attachment UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Link payload
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.LinkAttachmentRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.AttachmentResponse'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Link attachment to transaction
+      tags:
+      - Attachments
   /api/v1/auth/change-password:
     post:
       consumes:
@@ -433,6 +1412,421 @@ paths:
       summary: Register a new account
       tags:
       - Auth
+  /api/v1/budgets:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.BudgetResponse'
+                  type: array
+              type: object
+      security:
+      - BearerAuth: []
+      summary: List my budgets
+      tags:
+      - Budgets
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Budget data
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.CreateBudgetRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.BudgetResponse'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Create budget
+      tags:
+      - Budgets
+  /api/v1/budgets/{id}:
+    delete:
+      parameters:
+      - description: Budget UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: Delete budget
+      tags:
+      - Budgets
+    get:
+      parameters:
+      - description: Budget UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.BudgetResponse'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Get budget
+      tags:
+      - Budgets
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Budget UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Budget data
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.UpdateBudgetRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.BudgetResponse'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Update budget
+      tags:
+      - Budgets
+  /api/v1/categories:
+    get:
+      parameters:
+      - description: Filter by type
+        enum:
+        - income
+        - expense
+        in: query
+        name: type
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.CategoryResponse'
+                  type: array
+              type: object
+      security:
+      - BearerAuth: []
+      summary: List my + system categories
+      tags:
+      - Categories
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Category data
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.CreateCategoryRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.CategoryResponse'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Create category
+      tags:
+      - Categories
+  /api/v1/categories/{id}:
+    delete:
+      parameters:
+      - description: Category UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: Delete category
+      tags:
+      - Categories
+    get:
+      parameters:
+      - description: Category UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.CategoryResponse'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Get category
+      tags:
+      - Categories
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Category UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Category data
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.UpdateCategoryRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.CategoryResponse'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Update category
+      tags:
+      - Categories
+  /api/v1/transactions:
+    get:
+      parameters:
+      - description: Wallet UUID
+        in: query
+        name: wallet_id
+        type: string
+      - description: Category UUID
+        in: query
+        name: category_id
+        type: string
+      - description: income | expense
+        in: query
+        name: type
+        type: string
+      - description: ISO date / RFC3339 start
+        in: query
+        name: from
+        type: string
+      - description: ISO date / RFC3339 end
+        in: query
+        name: to
+        type: string
+      - description: Search description / merchant
+        in: query
+        name: q
+        type: string
+      - default: 1
+        description: Page
+        in: query
+        name: page
+        type: integer
+      - default: 20
+        description: Limit
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.TransactionResponse'
+                  type: array
+              type: object
+      security:
+      - BearerAuth: []
+      summary: List my transactions
+      tags:
+      - Transactions
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Transaction data
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.CreateTransactionRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.TransactionResponse'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Create transaction
+      tags:
+      - Transactions
+  /api/v1/transactions/{id}:
+    delete:
+      parameters:
+      - description: Transaction UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: Delete transaction
+      tags:
+      - Transactions
+    get:
+      parameters:
+      - description: Transaction UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.TransactionResponse'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Get transaction
+      tags:
+      - Transactions
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Transaction UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Transaction data
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.UpdateTransactionRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.TransactionResponse'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Update transaction
+      tags:
+      - Transactions
   /api/v1/users/me:
     get:
       produces:
@@ -538,6 +1932,130 @@ paths:
       summary: Upload user photo
       tags:
       - Users
+  /api/v1/wallets:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.WalletResponse'
+                  type: array
+              type: object
+      security:
+      - BearerAuth: []
+      summary: List my wallets
+      tags:
+      - Wallets
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Wallet data
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.CreateWalletRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.WalletResponse'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Create wallet
+      tags:
+      - Wallets
+  /api/v1/wallets/{id}:
+    delete:
+      parameters:
+      - description: Wallet UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: Delete wallet
+      tags:
+      - Wallets
+    get:
+      parameters:
+      - description: Wallet UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.WalletResponse'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Get wallet by ID
+      tags:
+      - Wallets
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Wallet UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Wallet data
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.UpdateWalletRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_ganiramadhan_starter-go_internal_dto.WalletResponse'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Update wallet
+      tags:
+      - Wallets
 schemes:
 - http
 - https

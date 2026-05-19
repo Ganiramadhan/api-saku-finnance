@@ -288,6 +288,709 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/ai-logs": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "AI Logs"
+                ],
+                "summary": "List my AI processing logs",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.AIProcessingLogResponse"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "AI Logs"
+                ],
+                "summary": "Record AI processing result",
+                "parameters": [
+                    {
+                        "description": "AI log payload",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.CreateAILogRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.AIProcessingLogResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/ai-logs/attachment/{attachment_id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "AI Logs"
+                ],
+                "summary": "Get AI log for an attachment",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Attachment UUID",
+                        "name": "attachment_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.AIProcessingLogResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/ai/categorize": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Uses Claude Sonnet 4 to extract amount, merchant, category \u0026 type from free-form text.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "AI"
+                ],
+                "summary": "AI: categorize transaction from raw OCR text",
+                "parameters": [
+                    {
+                        "description": "OCR text + optional user categories",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.CategorizeRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.CategorizeResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/ai/chat": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Free-form Q\u0026A with optional 30-day transaction context attached.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "AI"
+                ],
+                "summary": "AI: conversational finance assistant",
+                "parameters": [
+                    {
+                        "description": "User question",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.ChatRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.ChatResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/ai/insights": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Aggregates the user's transactions over a date range and asks Claude for a narrative summary, recommendations and anomalies.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "AI"
+                ],
+                "summary": "AI: financial insights for the current user",
+                "parameters": [
+                    {
+                        "description": "Date range (defaults to last 30 days)",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.InsightsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.InsightsResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/ai/scan-receipt": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Sends a base64-encoded receipt image to Claude vision and extracts structured fields.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "AI"
+                ],
+                "summary": "AI: scan receipt image (vision)",
+                "parameters": [
+                    {
+                        "description": "Base64 image (jpeg/png/webp)",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.ScanReceiptRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.ScanReceiptResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/ai/suggest-budget": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Uses recent expense history to suggest sensible monthly budget caps for each category.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "AI"
+                ],
+                "summary": "AI: recommend a monthly budget per category",
+                "parameters": [
+                    {
+                        "description": "Window in months (default 3) + optional wallet filter",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.SuggestBudgetRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.SuggestBudgetResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/attachments": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Attachments"
+                ],
+                "summary": "List attachments",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filter by transaction",
+                        "name": "transaction_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.AttachmentResponse"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Attachments"
+                ],
+                "summary": "Upload an attachment",
+                "parameters": [
+                    {
+                        "type": "file",
+                        "description": "Receipt file (image / pdf)",
+                        "name": "file",
+                        "in": "formData",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "image | pdf | screenshot",
+                        "name": "file_type",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "mobile | web | api",
+                        "name": "uploaded_from",
+                        "in": "formData"
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.AttachmentResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/attachments/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Attachments"
+                ],
+                "summary": "Get attachment",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Attachment UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.AttachmentResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Attachments"
+                ],
+                "summary": "Delete attachment",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Attachment UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/attachments/{id}/link": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Attachments"
+                ],
+                "summary": "Link attachment to transaction",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Attachment UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Link payload",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.LinkAttachmentRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.AttachmentResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/auth/change-password": {
             "post": {
                 "security": [
@@ -427,6 +1130,724 @@ const docTemplate = `{
                     },
                     "409": {
                         "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/budgets": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Budgets"
+                ],
+                "summary": "List my budgets",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.BudgetResponse"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Budgets"
+                ],
+                "summary": "Create budget",
+                "parameters": [
+                    {
+                        "description": "Budget data",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.CreateBudgetRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.BudgetResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/budgets/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Budgets"
+                ],
+                "summary": "Get budget",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Budget UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.BudgetResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Budgets"
+                ],
+                "summary": "Update budget",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Budget UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Budget data",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.UpdateBudgetRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.BudgetResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Budgets"
+                ],
+                "summary": "Delete budget",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Budget UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/categories": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Categories"
+                ],
+                "summary": "List my + system categories",
+                "parameters": [
+                    {
+                        "enum": [
+                            "income",
+                            "expense"
+                        ],
+                        "type": "string",
+                        "description": "Filter by type",
+                        "name": "type",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.CategoryResponse"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Categories"
+                ],
+                "summary": "Create category",
+                "parameters": [
+                    {
+                        "description": "Category data",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.CreateCategoryRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.CategoryResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/categories/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Categories"
+                ],
+                "summary": "Get category",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Category UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.CategoryResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Categories"
+                ],
+                "summary": "Update category",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Category UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Category data",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.UpdateCategoryRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.CategoryResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Categories"
+                ],
+                "summary": "Delete category",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Category UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/transactions": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Transactions"
+                ],
+                "summary": "List my transactions",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Wallet UUID",
+                        "name": "wallet_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Category UUID",
+                        "name": "category_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "income | expense",
+                        "name": "type",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "ISO date / RFC3339 start",
+                        "name": "from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "ISO date / RFC3339 end",
+                        "name": "to",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Search description / merchant",
+                        "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 1,
+                        "description": "Page",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 20,
+                        "description": "Limit",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.TransactionResponse"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Transactions"
+                ],
+                "summary": "Create transaction",
+                "parameters": [
+                    {
+                        "description": "Transaction data",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.CreateTransactionRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.TransactionResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/transactions/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Transactions"
+                ],
+                "summary": "Get transaction",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Transaction UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.TransactionResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Transactions"
+                ],
+                "summary": "Update transaction",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Transaction UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Transaction data",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.UpdateTransactionRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.TransactionResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Transactions"
+                ],
+                "summary": "Delete transaction",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Transaction UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse"
                         }
@@ -615,9 +2036,277 @@ const docTemplate = `{
                     }
                 }
             }
+        },
+        "/api/v1/wallets": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Wallets"
+                ],
+                "summary": "List my wallets",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.WalletResponse"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Wallets"
+                ],
+                "summary": "Create wallet",
+                "parameters": [
+                    {
+                        "description": "Wallet data",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.CreateWalletRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.WalletResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/wallets/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Wallets"
+                ],
+                "summary": "Get wallet by ID",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Wallet UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.WalletResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Wallets"
+                ],
+                "summary": "Update wallet",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Wallet UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Wallet data",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.UpdateWalletRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.WalletResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Wallets"
+                ],
+                "summary": "Delete wallet",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Wallet UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.APIResponse"
+                        }
+                    }
+                }
+            }
         }
     },
     "definitions": {
+        "github_com_ganiramadhan_starter-go_internal_dto.AIProcessingLogResponse": {
+            "type": "object",
+            "properties": {
+                "attachment_id": {
+                    "type": "string"
+                },
+                "confidence_score": {
+                    "type": "number"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "error_message": {
+                    "type": "string"
+                },
+                "extracted_amount": {
+                    "type": "number"
+                },
+                "extracted_category": {
+                    "type": "string"
+                },
+                "extracted_merchant": {
+                    "type": "string"
+                },
+                "feature": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "latency_ms": {
+                    "type": "integer"
+                },
+                "model_version": {
+                    "type": "string"
+                },
+                "raw_response": {
+                    "type": "object"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_ganiramadhan_starter-go_internal_dto.APIResponse": {
             "type": "object",
             "properties": {
@@ -639,6 +2328,38 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_ganiramadhan_starter-go_internal_dto.AttachmentResponse": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "file_type": {
+                    "type": "string"
+                },
+                "file_url": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "ocr_text": {
+                    "type": "string"
+                },
+                "preview_url": {
+                    "type": "string"
+                },
+                "transaction_id": {
+                    "type": "string"
+                },
+                "uploaded_from": {
+                    "type": "string"
+                },
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_ganiramadhan_starter-go_internal_dto.AuthResponse": {
             "type": "object",
             "properties": {
@@ -648,6 +2369,138 @@ const docTemplate = `{
                 },
                 "user": {
                     "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.UserResponse"
+                }
+            }
+        },
+        "github_com_ganiramadhan_starter-go_internal_dto.BudgetResponse": {
+            "type": "object",
+            "properties": {
+                "category_id": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "limit_amount": {
+                    "type": "number"
+                },
+                "period": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user_id": {
+                    "type": "string"
+                },
+                "wallet_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_ganiramadhan_starter-go_internal_dto.BudgetSuggestion": {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string",
+                    "example": "Food \u0026 Beverage"
+                },
+                "limit_amount": {
+                    "type": "number",
+                    "example": 1500000
+                },
+                "period": {
+                    "type": "string",
+                    "example": "monthly"
+                },
+                "reason": {
+                    "type": "string",
+                    "example": "Average spend over last 3 months: 1.4M"
+                }
+            }
+        },
+        "github_com_ganiramadhan_starter-go_internal_dto.CategorizeRequest": {
+            "type": "object",
+            "required": [
+                "text"
+            ],
+            "properties": {
+                "text": {
+                    "type": "string",
+                    "minLength": 3,
+                    "example": "Starbucks Coffee Rp 87.500"
+                },
+                "user_categories": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "Food",
+                        "Shopping",
+                        "Transport"
+                    ]
+                }
+            }
+        },
+        "github_com_ganiramadhan_starter-go_internal_dto.CategorizeResponse": {
+            "type": "object",
+            "properties": {
+                "amount": {
+                    "type": "number",
+                    "example": 87500
+                },
+                "category": {
+                    "type": "string",
+                    "example": "Food \u0026 Beverage"
+                },
+                "confidence": {
+                    "type": "number",
+                    "example": 0.95
+                },
+                "merchant_name": {
+                    "type": "string",
+                    "example": "Starbucks"
+                },
+                "needs_review": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "raw_response": {
+                    "type": "object"
+                },
+                "type": {
+                    "type": "string",
+                    "example": "expense"
+                }
+            }
+        },
+        "github_com_ganiramadhan_starter-go_internal_dto.CategoryResponse": {
+            "type": "object",
+            "properties": {
+                "color": {
+                    "type": "string"
+                },
+                "icon": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "is_system": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                },
+                "user_id": {
+                    "type": "string"
                 }
             }
         },
@@ -667,6 +2520,208 @@ const docTemplate = `{
                     "maxLength": 72,
                     "minLength": 6,
                     "example": "newSecret123"
+                }
+            }
+        },
+        "github_com_ganiramadhan_starter-go_internal_dto.ChatRequest": {
+            "type": "object",
+            "required": [
+                "message"
+            ],
+            "properties": {
+                "include_context": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "message": {
+                    "type": "string",
+                    "maxLength": 2000,
+                    "minLength": 2,
+                    "example": "Berapa pengeluaran terbesar saya bulan ini?"
+                }
+            }
+        },
+        "github_com_ganiramadhan_starter-go_internal_dto.ChatResponse": {
+            "type": "object",
+            "properties": {
+                "reply": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_ganiramadhan_starter-go_internal_dto.CreateAILogRequest": {
+            "type": "object",
+            "required": [
+                "feature",
+                "status"
+            ],
+            "properties": {
+                "attachment_id": {
+                    "type": "string"
+                },
+                "confidence_score": {
+                    "type": "number",
+                    "maximum": 1,
+                    "minimum": 0
+                },
+                "error_message": {
+                    "type": "string",
+                    "maxLength": 2000
+                },
+                "extracted_amount": {
+                    "type": "number",
+                    "minimum": 0
+                },
+                "extracted_category": {
+                    "type": "string",
+                    "maxLength": 120
+                },
+                "extracted_merchant": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "feature": {
+                    "type": "string",
+                    "enum": [
+                        "categorize",
+                        "scan_receipt",
+                        "insights",
+                        "suggest_budget",
+                        "chat"
+                    ]
+                },
+                "latency_ms": {
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "model_version": {
+                    "type": "string",
+                    "maxLength": 64
+                },
+                "raw_response": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string",
+                    "enum": [
+                        "pending",
+                        "success",
+                        "failed"
+                    ]
+                }
+            }
+        },
+        "github_com_ganiramadhan_starter-go_internal_dto.CreateBudgetRequest": {
+            "type": "object",
+            "required": [
+                "category_id",
+                "limit_amount",
+                "period",
+                "wallet_id"
+            ],
+            "properties": {
+                "category_id": {
+                    "type": "string"
+                },
+                "limit_amount": {
+                    "type": "number"
+                },
+                "period": {
+                    "type": "string",
+                    "enum": [
+                        "daily",
+                        "weekly",
+                        "monthly"
+                    ]
+                },
+                "wallet_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_ganiramadhan_starter-go_internal_dto.CreateCategoryRequest": {
+            "type": "object",
+            "required": [
+                "name",
+                "type"
+            ],
+            "properties": {
+                "color": {
+                    "type": "string",
+                    "maxLength": 16,
+                    "example": "#FF8800"
+                },
+                "icon": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "example": "utensils"
+                },
+                "name": {
+                    "type": "string",
+                    "maxLength": 120,
+                    "minLength": 2,
+                    "example": "Food"
+                },
+                "type": {
+                    "type": "string",
+                    "enum": [
+                        "income",
+                        "expense"
+                    ],
+                    "example": "expense"
+                }
+            }
+        },
+        "github_com_ganiramadhan_starter-go_internal_dto.CreateTransactionRequest": {
+            "type": "object",
+            "required": [
+                "amount",
+                "category_id",
+                "transaction_date",
+                "type",
+                "wallet_id"
+            ],
+            "properties": {
+                "amount": {
+                    "type": "number"
+                },
+                "category_id": {
+                    "type": "string"
+                },
+                "confidence_score": {
+                    "type": "number",
+                    "maximum": 1,
+                    "minimum": 0
+                },
+                "description": {
+                    "type": "string",
+                    "maxLength": 2000
+                },
+                "merchant_name": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "source": {
+                    "type": "string",
+                    "enum": [
+                        "manual",
+                        "ai_ocr",
+                        "import",
+                        "api"
+                    ]
+                },
+                "transaction_date": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string",
+                    "enum": [
+                        "income",
+                        "expense"
+                    ]
+                },
+                "wallet_id": {
+                    "type": "string"
                 }
             }
         },
@@ -705,6 +2760,124 @@ const docTemplate = `{
                         "admin"
                     ],
                     "example": "user"
+                }
+            }
+        },
+        "github_com_ganiramadhan_starter-go_internal_dto.CreateWalletRequest": {
+            "type": "object",
+            "required": [
+                "name",
+                "type"
+            ],
+            "properties": {
+                "balance": {
+                    "type": "number",
+                    "minimum": 0,
+                    "example": 1500000
+                },
+                "currency": {
+                    "type": "string",
+                    "example": "IDR"
+                },
+                "is_default": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "name": {
+                    "type": "string",
+                    "maxLength": 120,
+                    "minLength": 2,
+                    "example": "BCA Tabungan"
+                },
+                "type": {
+                    "type": "string",
+                    "enum": [
+                        "personal",
+                        "business",
+                        "shared"
+                    ],
+                    "example": "personal"
+                }
+            }
+        },
+        "github_com_ganiramadhan_starter-go_internal_dto.InsightsRequest": {
+            "type": "object",
+            "properties": {
+                "from": {
+                    "type": "string",
+                    "example": "2026-04-01"
+                },
+                "limit": {
+                    "type": "integer",
+                    "maximum": 500,
+                    "minimum": 1,
+                    "example": 100
+                },
+                "to": {
+                    "type": "string",
+                    "example": "2026-04-30"
+                }
+            }
+        },
+        "github_com_ganiramadhan_starter-go_internal_dto.InsightsResponse": {
+            "type": "object",
+            "properties": {
+                "anomalies": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "health_score": {
+                    "type": "integer",
+                    "example": 72
+                },
+                "period": {
+                    "type": "string",
+                    "example": "2026-04-01 to 2026-04-30"
+                },
+                "raw_response": {
+                    "type": "object"
+                },
+                "recommendations": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "summary": {
+                    "type": "string",
+                    "example": "You spent 4.2M this month, 18% above last month."
+                },
+                "top_categories": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "Food",
+                        "Transport",
+                        "Shopping"
+                    ]
+                },
+                "total_expense": {
+                    "type": "number",
+                    "example": 4250000
+                },
+                "total_income": {
+                    "type": "number",
+                    "example": 8000000
+                }
+            }
+        },
+        "github_com_ganiramadhan_starter-go_internal_dto.LinkAttachmentRequest": {
+            "type": "object",
+            "required": [
+                "transaction_id"
+            ],
+            "properties": {
+                "transaction_id": {
+                    "type": "string"
                 }
             }
         },
@@ -780,6 +2953,221 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_ganiramadhan_starter-go_internal_dto.ScanReceiptRequest": {
+            "type": "object",
+            "required": [
+                "image_base64"
+            ],
+            "properties": {
+                "image_base64": {
+                    "type": "string",
+                    "example": "iVBORw0KGgoAAAANSUhEUgAA..."
+                },
+                "media_type": {
+                    "type": "string",
+                    "enum": [
+                        "image/jpeg",
+                        "image/png",
+                        "image/webp"
+                    ],
+                    "example": "image/jpeg"
+                },
+                "user_categories": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "github_com_ganiramadhan_starter-go_internal_dto.ScanReceiptResponse": {
+            "type": "object",
+            "properties": {
+                "amount": {
+                    "type": "number",
+                    "example": 87500
+                },
+                "category": {
+                    "type": "string",
+                    "example": "Food \u0026 Beverage"
+                },
+                "confidence": {
+                    "type": "number",
+                    "example": 0.95
+                },
+                "currency": {
+                    "type": "string",
+                    "example": "IDR"
+                },
+                "date": {
+                    "type": "string",
+                    "example": "2026-05-12"
+                },
+                "merchant_name": {
+                    "type": "string",
+                    "example": "Starbucks Sudirman"
+                },
+                "needs_review": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "ocr_text": {
+                    "type": "string"
+                },
+                "raw_response": {
+                    "type": "object"
+                },
+                "type": {
+                    "type": "string",
+                    "example": "expense"
+                }
+            }
+        },
+        "github_com_ganiramadhan_starter-go_internal_dto.SuggestBudgetRequest": {
+            "type": "object",
+            "properties": {
+                "months": {
+                    "type": "integer",
+                    "maximum": 12,
+                    "minimum": 1,
+                    "example": 3
+                },
+                "wallet_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_ganiramadhan_starter-go_internal_dto.SuggestBudgetResponse": {
+            "type": "object",
+            "properties": {
+                "notes": {
+                    "type": "string"
+                },
+                "raw_response": {
+                    "type": "object"
+                },
+                "suggestions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_ganiramadhan_starter-go_internal_dto.BudgetSuggestion"
+                    }
+                }
+            }
+        },
+        "github_com_ganiramadhan_starter-go_internal_dto.TransactionResponse": {
+            "type": "object",
+            "properties": {
+                "amount": {
+                    "type": "number"
+                },
+                "category_id": {
+                    "type": "string"
+                },
+                "confidence_score": {
+                    "type": "number"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "merchant_name": {
+                    "type": "string"
+                },
+                "source": {
+                    "type": "string"
+                },
+                "transaction_date": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "wallet_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_ganiramadhan_starter-go_internal_dto.UpdateBudgetRequest": {
+            "type": "object",
+            "properties": {
+                "limit_amount": {
+                    "type": "number"
+                },
+                "period": {
+                    "type": "string",
+                    "enum": [
+                        "daily",
+                        "weekly",
+                        "monthly"
+                    ]
+                }
+            }
+        },
+        "github_com_ganiramadhan_starter-go_internal_dto.UpdateCategoryRequest": {
+            "type": "object",
+            "properties": {
+                "color": {
+                    "type": "string",
+                    "maxLength": 16
+                },
+                "icon": {
+                    "type": "string",
+                    "maxLength": 64
+                },
+                "name": {
+                    "type": "string",
+                    "maxLength": 120,
+                    "minLength": 2
+                },
+                "type": {
+                    "type": "string",
+                    "enum": [
+                        "income",
+                        "expense"
+                    ]
+                }
+            }
+        },
+        "github_com_ganiramadhan_starter-go_internal_dto.UpdateTransactionRequest": {
+            "type": "object",
+            "properties": {
+                "amount": {
+                    "type": "number"
+                },
+                "category_id": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string",
+                    "maxLength": 2000
+                },
+                "merchant_name": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "transaction_date": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string",
+                    "enum": [
+                        "income",
+                        "expense"
+                    ]
+                },
+                "wallet_id": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_ganiramadhan_starter-go_internal_dto.UpdateUserRequest": {
             "type": "object",
             "properties": {
@@ -810,6 +3198,34 @@ const docTemplate = `{
                         "admin"
                     ],
                     "example": "admin"
+                }
+            }
+        },
+        "github_com_ganiramadhan_starter-go_internal_dto.UpdateWalletRequest": {
+            "type": "object",
+            "properties": {
+                "balance": {
+                    "type": "number",
+                    "minimum": 0
+                },
+                "currency": {
+                    "type": "string"
+                },
+                "is_default": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string",
+                    "maxLength": 120,
+                    "minLength": 2
+                },
+                "type": {
+                    "type": "string",
+                    "enum": [
+                        "personal",
+                        "business",
+                        "shared"
+                    ]
                 }
             }
         },
@@ -856,6 +3272,38 @@ const docTemplate = `{
                 "role": {
                     "type": "string",
                     "example": "user"
+                }
+            }
+        },
+        "github_com_ganiramadhan_starter-go_internal_dto.WalletResponse": {
+            "type": "object",
+            "properties": {
+                "balance": {
+                    "type": "number"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "currency": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "is_default": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user_id": {
+                    "type": "string"
                 }
             }
         }

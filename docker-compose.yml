@@ -1,13 +1,3 @@
-# ─────────────────────────────────────────────────────────────────────────────
-# Starter Go API — local stack: postgres + redis + minio + api
-#
-# Usage:
-#   docker compose up -d              # start everything
-#   docker compose up -d postgres redis minio minio-init   # deps only
-#   docker compose logs -f api        # tail API logs
-#   docker compose down -v            # stop + WIPE volumes
-# ─────────────────────────────────────────────────────────────────────────────
-
 name: starter-go
 
 services:
@@ -16,15 +6,15 @@ services:
     container_name: starter-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${DB_USER:-postgres}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
-      POSTGRES_DB: ${DB_NAME:-starter}
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: saku
     ports:
-      - "${DB_PORT:-5432}:5432"
+      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-starter}"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d saku"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -36,7 +26,7 @@ services:
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      - "6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -52,8 +42,8 @@ services:
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: ${AWS_ACCESS_KEY_ID:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${AWS_SECRET_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
     ports:
       - "9000:9000"   # S3 API
       - "9001:9001"   # Web console
@@ -66,19 +56,22 @@ services:
       retries: 10
     networks: [backend]
 
-  # One-shot job: ensures the bucket exists on first boot.
   minio-init:
     image: minio/mc:latest
     container_name: starter-minio-init
     depends_on:
       minio:
         condition: service_healthy
+    environment:
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+      AWS_BUCKET: saku
     entrypoint: >
-      /bin/sh -c "
-      mc alias set local http://minio:9000 ${AWS_ACCESS_KEY_ID:-minioadmin} ${AWS_SECRET_ACCESS_KEY:-minioadmin} &&
-      mc mb --ignore-existing local/${AWS_BUCKET:-starter} &&
-      echo 'minio: bucket ${AWS_BUCKET:-starter} ready'
-      "
+      /bin/sh -c '
+      mc alias set local http://minio:9000 "$$AWS_ACCESS_KEY_ID" "$$AWS_SECRET_ACCESS_KEY" &&
+      mc mb --ignore-existing local/"$$AWS_BUCKET" &&
+      echo "minio: bucket $$AWS_BUCKET ready"
+      '
     networks: [backend]
     restart: "no"
 
@@ -98,18 +91,40 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
-    env_file:
-      - envs/.env
-    # Override host names so the container reaches sibling services by DNS.
     environment:
+      APP_PORT: 4000
+      APP_ENV: development
+      CORS_ORIGINS: http://localhost:3000
       DB_HOST: postgres
       DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: saku
+      DB_SSLMODE: disable
+      DB_MAX_OPEN_CONNS: 25
+      DB_MAX_IDLE_CONNS: 5
+      DB_CONN_MAX_LIFETIME: 5
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      REDIS_PASSWORD: ""
+      REDIS_DB: 0
+      REDIS_POOL_SIZE: 10
+      JWT_SECRET: secret
+      JWT_TTL_HOURS: 24
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_BUCKET: saku
       AWS_ENDPOINT: http://minio:9000
       AWS_USE_PATH_STYLE_ENDPOINT: "true"
+      CLAUDE_API_KEY: ""
+      CLAUDE_MODEL: claude-sonnet-4-5
+      MIDTRANS_SERVER_KEY: SB-Mid-server-TYtZRGMWCxUBmrSskjtT27BF
+      MIDTRANS_CLIENT_KEY: SB-Mid-client-yptkciOJel1brnqp
+      MIDTRANS_IS_PROD: "false"
+      GOOGLE_CLIENT_ID: ""
     ports:
-      - "${APP_PORT:-4000}:4000"
+      - "4000:4000"
     networks: [backend]
 
 volumes:

@@ -21,7 +21,6 @@ import (
 	"github.com/ganiramadhan/starter-go/internal/config"
 )
 
-// version is overridden at build time via -ldflags "-X main.version=...".
 var version = "dev"
 
 func main() {

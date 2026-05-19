@@ -11,8 +11,18 @@ import (
 	"github.com/ganiramadhan/starter-go/internal/config"
 	"github.com/ganiramadhan/starter-go/internal/dto"
 	"github.com/ganiramadhan/starter-go/internal/middleware"
+	aimodule "github.com/ganiramadhan/starter-go/internal/modules/ai"
+	"github.com/ganiramadhan/starter-go/internal/modules/ailog"
 	"github.com/ganiramadhan/starter-go/internal/modules/auth"
+	"github.com/ganiramadhan/starter-go/internal/modules/budget"
+	"github.com/ganiramadhan/starter-go/internal/modules/category"
+	"github.com/ganiramadhan/starter-go/internal/modules/savingsgoal"
+	"github.com/ganiramadhan/starter-go/internal/modules/splitbill"
+	"github.com/ganiramadhan/starter-go/internal/modules/subscription"
+	"github.com/ganiramadhan/starter-go/internal/modules/transaction"
 	"github.com/ganiramadhan/starter-go/internal/modules/user"
+	"github.com/ganiramadhan/starter-go/internal/modules/wallet"
+	aiplatform "github.com/ganiramadhan/starter-go/internal/platform/ai"
 	"github.com/ganiramadhan/starter-go/internal/platform/cache"
 	"github.com/ganiramadhan/starter-go/internal/platform/database"
 	"github.com/ganiramadhan/starter-go/internal/platform/storage"
@@ -38,6 +48,7 @@ type App struct {
 	cache     cache.Cache
 	storage   storage.Storage
 	validator *validator.Validator
+	subSvc    subscription.Service
 }
 
 func New(cfg *config.Config) (*App, error) {
@@ -77,6 +88,17 @@ func (a *App) initDatabase() error {
 	} else {
 		log.Println("database: migrated")
 	}
+
+	// Seed system categories
+	if err := database.SeedSystemCategories(db); err != nil {
+		log.Printf("database: seed warning: %v", err)
+	}
+
+	// Seed subscription plans
+	if err := database.SeedPlans(db); err != nil {
+		log.Printf("database: seed plans warning: %v", err)
+	}
+
 	return nil
 }
 
@@ -148,18 +170,52 @@ func (a *App) initHTTP() {
 
 	// Repositories
 	userRepo := user.NewRepository(a.db)
+	walletRepo := wallet.NewRepository(a.db)
+	categoryRepo := category.NewRepository(a.db)
+	txnRepo := transaction.NewRepository(a.db)
+	aiLogRepo := ailog.NewRepository(a.db)
+	budgetRepo := budget.NewRepository(a.db)
+	goalRepo := savingsgoal.NewRepository(a.db)
+	splitRepo := splitbill.NewRepository(a.db)
+	subRepo := subscription.NewRepository(a.db)
 
 	// Services
 	userSvc := user.NewService(userRepo, a.storage)
-	authSvc := auth.NewService(userRepo, jwtMgr)
+	authSvc := auth.NewService(userRepo, jwtMgr, a.cfg.Google.ClientID)
+	walletSvc := wallet.NewService(walletRepo)
+	categorySvc := category.NewService(categoryRepo)
+	txnSvc := transaction.NewService(txnRepo, walletRepo, categoryRepo)
+	txnExportSvc := transaction.NewExportService(txnRepo, walletRepo, categoryRepo)
+	aiLogSvc := ailog.NewService(aiLogRepo, a.storage)
+	budgetSvc := budget.NewService(budgetRepo, walletRepo, categoryRepo)
+	goalSvc := savingsgoal.NewService(goalRepo)
+	splitSvc := splitbill.NewService(splitRepo)
+	midtransClient := subscription.NewMidtransClient(a.cfg.Midtrans.ServerKey, a.cfg.Midtrans.IsProduction)
+	subSvc := subscription.NewService(subRepo, userRepo, midtransClient, a.cfg.Midtrans.ClientKey, a.cfg.Midtrans.IsProduction)
+	a.subSvc = subSvc
+
+	// AI (Claude)
+	claudeClient := aiplatform.NewClient(a.cfg.Claude.APIKey, a.cfg.Claude.Model)
+	aiSvc := aimodule.NewService(claudeClient, txnRepo, categoryRepo, aiLogSvc, a.storage, a.cfg.Claude.Model)
+
+	txnHandler := transaction.NewHandler(txnSvc, a.validator)
+	txnHandler.SetExportService(txnExportSvc)
 
 	routes.Register(a.fiber, routes.Handlers{
-		Auth: auth.NewHandler(authSvc, a.validator),
-		User: user.NewHandler(userSvc, a.storage, a.validator),
+		Auth:         auth.NewHandler(authSvc, a.validator),
+		User:         user.NewHandler(userSvc, a.storage, a.validator),
+		Wallet:       wallet.NewHandler(walletSvc, a.validator),
+		Category:     category.NewHandler(categorySvc, a.validator),
+		Transaction:  txnHandler,
+		AILog:        ailog.NewHandler(aiLogSvc, a.validator),
+		Budget:       budget.NewHandler(budgetSvc, a.validator),
+		SavingsGoal:  savingsgoal.NewHandler(goalSvc, a.validator),
+		Subscription: subscription.NewHandler(subSvc, a.validator),
+		SplitBill:    splitbill.NewHandler(splitSvc, a.validator),
+		AI:           aimodule.NewHandler(aiSvc, a.validator),
 	}, jwtMgr)
 }
 
-// Run starts the HTTP server and blocks until SIGINT/SIGTERM triggers shutdown.
 func (a *App) Run() error {
 	defer a.close()
 

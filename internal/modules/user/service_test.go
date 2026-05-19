@@ -98,6 +98,15 @@ func (s *fakeStorage) Upload(ctx context.Context, file *multipart.FileHeader, fo
 	return key, nil
 }
 
+func (s *fakeStorage) UploadBytes(ctx context.Context, data []byte, contentType, folder, ext string) (string, error) {
+	if ext == "" {
+		ext = ".bin"
+	}
+	key := folder + "/bytes-" + uuid.New().String() + ext
+	s.put(key)
+	return key, nil
+}
+
 func (s *fakeStorage) PresignedURL(ctx context.Context, objectKey string, ttl time.Duration) (string, error) {
 	if objectKey == "" {
 		return "", nil
