@@ -110,6 +110,7 @@ type TransactionListQuery struct {
 	WalletID   string `query:"wallet_id"`
 	CategoryID string `query:"category_id"`
 	Type       string `query:"type"`
+	Source     string `query:"source"`
 	From       string `query:"from"` // ISO date
 	To         string `query:"to"`
 	Search     string `query:"q"`
@@ -135,6 +136,10 @@ type AIProcessingLogResponse struct {
 	ImageURL          string         `json:"image_url,omitempty"`
 	CreatedAt         time.Time      `json:"created_at"`
 	UpdatedAt         time.Time      `json:"updated_at"`
+}
+
+type DeleteAIProcessingLogsRequest struct {
+	IDs []uuid.UUID `json:"ids" validate:"required,min=1,dive,required"`
 }
 
 type CreateBudgetRequest struct {
@@ -167,6 +172,7 @@ type BudgetResponse struct {
 type CategorizeRequest struct {
 	Text           string   `json:"text" validate:"required,min=3" example:"Starbucks Coffee Rp 87.500"`
 	UserCategories []string `json:"user_categories" validate:"omitempty" example:"Food,Shopping,Transport"`
+	SessionID      string   `json:"session_id,omitempty" validate:"omitempty,max=120"`
 }
 
 type CategorizeResponse struct {
@@ -254,10 +260,48 @@ type ChatRequest struct {
 	Message        string     `json:"message" validate:"required,min=1,max=2000" example:"Berapa pengeluaran terbesar saya bulan ini?"`
 	IncludeContext bool       `json:"include_context" example:"true"`
 	History        []ChatTurn `json:"history,omitempty"`
+	SessionID      string     `json:"session_id,omitempty" validate:"omitempty,max=120"`
 }
 
 type ChatResponse struct {
 	Reply string `json:"reply"`
+}
+
+type UpcomingBillingRequest struct {
+	Name     string    `json:"name" validate:"required,min=2,max=120"`
+	Provider string    `json:"provider,omitempty" validate:"omitempty,max=120"`
+	Amount   float64   `json:"amount" validate:"required,gt=0"`
+	Currency string    `json:"currency,omitempty" validate:"omitempty,max=8"`
+	Cycle    string    `json:"cycle" validate:"required,oneof=weekly monthly yearly"`
+	DueDate  time.Time `json:"due_date" validate:"required"`
+	Status   string    `json:"status,omitempty" validate:"omitempty,oneof=active paused"`
+	Notes    string    `json:"notes,omitempty" validate:"omitempty,max=500"`
+}
+
+type UpdateUpcomingBillingRequest struct {
+	Name     *string    `json:"name,omitempty" validate:"omitempty,min=2,max=120"`
+	Provider *string    `json:"provider,omitempty" validate:"omitempty,max=120"`
+	Amount   *float64   `json:"amount,omitempty" validate:"omitempty,gt=0"`
+	Currency *string    `json:"currency,omitempty" validate:"omitempty,max=8"`
+	Cycle    *string    `json:"cycle,omitempty" validate:"omitempty,oneof=weekly monthly yearly"`
+	DueDate  *time.Time `json:"due_date,omitempty"`
+	Status   *string    `json:"status,omitempty" validate:"omitempty,oneof=active paused"`
+	Notes    *string    `json:"notes,omitempty" validate:"omitempty,max=500"`
+}
+
+type UpcomingBillingResponse struct {
+	ID        uuid.UUID `json:"id"`
+	UserID    uuid.UUID `json:"user_id"`
+	Name      string    `json:"name"`
+	Provider  string    `json:"provider"`
+	Amount    float64   `json:"amount"`
+	Currency  string    `json:"currency"`
+	Cycle     string    `json:"cycle"`
+	DueDate   time.Time `json:"due_date"`
+	Status    string    `json:"status"`
+	Notes     string    `json:"notes"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type CreateSavingsGoalRequest struct {

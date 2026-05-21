@@ -17,8 +17,21 @@ type Repository interface {
 	UpdateSubscription(s *domain.Subscription) error
 	FindByOrderID(orderID string) (*domain.Subscription, error)
 	FindActiveByUserID(userID uuid.UUID) (*domain.Subscription, error)
+	FindByUserID(userID, id uuid.UUID) (*domain.Subscription, error)
 	ListByUserID(userID uuid.UUID) ([]domain.Subscription, error)
 	ListAll(limit, offset int) ([]domain.Subscription, error)
+	ListActiveForReminder() ([]domain.Subscription, error)
+}
+
+func (r *repository) FindByUserID(userID, id uuid.UUID) (*domain.Subscription, error) {
+	var s domain.Subscription
+	if err := r.db.Preload("Plan").Where("id = ? AND user_id = ?", id, userID).First(&s).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, domain.ErrNotFound
+		}
+		return nil, err
+	}
+	return &s, nil
 }
 
 type repository struct{ db *gorm.DB }
@@ -111,6 +124,16 @@ func (r *repository) ListAll(limit, offset int) ([]domain.Subscription, error) {
 		Order("created_at DESC").
 		Limit(limit).
 		Offset(offset).
+		Find(&rows).Error
+	return rows, err
+}
+
+func (r *repository) ListActiveForReminder() ([]domain.Subscription, error) {
+	var rows []domain.Subscription
+	err := r.db.
+		Preload("Plan").
+		Preload("User").
+		Where("status = ?", domain.SubscriptionStatusActive).
 		Find(&rows).Error
 	return rows, err
 }

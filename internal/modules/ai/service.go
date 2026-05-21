@@ -85,6 +85,8 @@ OUTPUT RULES:
 - Reply in the user's language (Bahasa Indonesia by default).
 - Use Rupiah formatting like "Rp 25.000" when mentioning money.
 - Keep prose answers concise (2-6 short sentences). For list/table/JSON requests, output may be longer — stay accurate.
+- Do not use markdown emphasis like **bold**. Prefer clean professional plain text.
+- If the user seems confused, tell them they can type "help" for guidance.
 - Do NOT invent figures. If a number isn't in the context / previous answer, say you don't have it.`
 
 // ─── 1. Categorize from raw text ────────────────────────────────────────────
@@ -143,11 +145,16 @@ Return ONLY this JSON shape (no markdown, no commentary):
 	latency := int(time.Since(start).Milliseconds())
 
 	if err != nil {
-		s.recordAsync(userID, aiLogEntry{Feature: featureCategorize, Status: "failed", LatencyMs: latency, ErrMsg: err.Error()})
+		s.record(userID, aiLogEntry{Feature: featureCategorize, Status: "failed", LatencyMs: latency, ErrMsg: err.Error(), Raw: map[string]any{"message": req.Text, "session_id": req.SessionID}})
 		return dto.CategorizeResponse{}, err
 	}
 
 	parsed := parseJSON(raw)
+	if parsed == nil {
+		parsed = map[string]any{}
+	}
+	parsed["message"] = req.Text
+	parsed["session_id"] = req.SessionID
 	items := extractCategorizeItems(parsed)
 
 	out := dto.CategorizeResponse{
@@ -181,7 +188,7 @@ Return ONLY this JSON shape (no markdown, no commentary):
 	out.NeedsReview = needsReview(out.Confidence, parsed == nil)
 
 	s.logLowConfidence(featureCategorize, out.Confidence, parsed)
-	s.recordAsync(userID, aiLogEntry{
+	s.record(userID, aiLogEntry{
 		Feature: featureCategorize, Status: "success", LatencyMs: latency,
 		Confidence: &out.Confidence, Merchant: out.MerchantName, Category: out.Category,
 		Amount: amountPtr(out.Amount), Raw: parsed,
@@ -290,7 +297,7 @@ Return ONLY this JSON (no commentary, no markdown fences):
 	latency := int(time.Since(start).Milliseconds())
 
 	if err != nil {
-		s.recordAsync(userID, aiLogEntry{Feature: featureScanReceipt, Status: "failed", LatencyMs: latency, ErrMsg: err.Error()})
+		s.record(userID, aiLogEntry{Feature: featureScanReceipt, Status: "failed", LatencyMs: latency, ErrMsg: err.Error(), Raw: map[string]any{"media_type": mediaType}})
 		return dto.ScanReceiptResponse{}, err
 	}
 
@@ -325,7 +332,7 @@ Return ONLY this JSON (no commentary, no markdown fences):
 	}
 
 	s.logLowConfidence(featureScanReceipt, out.Confidence, parsed)
-	s.recordAsync(userID, aiLogEntry{
+	s.record(userID, aiLogEntry{
 		Feature: featureScanReceipt, Status: "success", LatencyMs: latency,
 		Confidence: &out.Confidence, Merchant: out.MerchantName, Category: out.Category,
 		Amount: &out.Amount, Raw: parsed,
@@ -374,7 +381,7 @@ Return ONLY this JSON:
 	latency := int(time.Since(start).Milliseconds())
 
 	if err != nil {
-		s.recordAsync(userID, aiLogEntry{Feature: featureInsights, Status: "failed", LatencyMs: latency, ErrMsg: err.Error()})
+		s.record(userID, aiLogEntry{Feature: featureInsights, Status: "failed", LatencyMs: latency, ErrMsg: err.Error()})
 		return dto.InsightsResponse{}, err
 	}
 
@@ -390,7 +397,7 @@ Return ONLY this JSON:
 		TotalExpense:    expense,
 		RawResponse:     parsed,
 	}
-	s.recordAsync(userID, aiLogEntry{Feature: featureInsights, Status: "success", LatencyMs: latency, Raw: parsed})
+	s.record(userID, aiLogEntry{Feature: featureInsights, Status: "success", LatencyMs: latency, Raw: parsed})
 	return out, nil
 }
 
@@ -437,7 +444,7 @@ Return ONLY this JSON:
 	latency := int(time.Since(start).Milliseconds())
 
 	if err != nil {
-		s.recordAsync(userID, aiLogEntry{Feature: featureSuggestBudget, Status: "failed", LatencyMs: latency, ErrMsg: err.Error()})
+		s.record(userID, aiLogEntry{Feature: featureSuggestBudget, Status: "failed", LatencyMs: latency, ErrMsg: err.Error()})
 		return dto.SuggestBudgetResponse{}, err
 	}
 
@@ -447,14 +454,19 @@ Return ONLY this JSON:
 		Notes:       getString(parsed, "notes"),
 		RawResponse: parsed,
 	}
-	s.recordAsync(userID, aiLogEntry{Feature: featureSuggestBudget, Status: "success", LatencyMs: latency, Raw: parsed})
+	s.record(userID, aiLogEntry{Feature: featureSuggestBudget, Status: "success", LatencyMs: latency, Raw: parsed})
 	return out, nil
 }
 
 func (s *service) Chat(ctx context.Context, userID uuid.UUID, req dto.ChatRequest) (dto.ChatResponse, error) {
+	if isHelpMessage(req.Message) {
+		reply := "Panduan Chatbot:\n1. Tanyakan ringkasan pengeluaran, kategori terbesar, atau perbandingan bulan ini.\n2. Minta format spesifik seperti list singkat atau tabel.\n3. Jawaban memakai data transaksi yang tersedia di akunmu.\n4. Untuk mencatat transaksi, gunakan mode NLP dan tulis contoh seperti \"beli kopi 25rb\"."
+		s.record(userID, aiLogEntry{Feature: featureChat, Status: "success", LatencyMs: 0, Raw: map[string]any{"message": req.Message, "reply": reply, "session_id": req.SessionID}})
+		return dto.ChatResponse{Reply: reply}, nil
+	}
 	if isHardOffTopic(req.Message) {
 		reply := "Maaf, saya hanya bisa membantu seputar keuangan pribadi dan fitur SAKU. Boleh tanya soal pengeluaran, anggaran, atau transaksi kamu."
-		s.recordAsync(userID, aiLogEntry{Feature: featureChat, Status: "success", LatencyMs: 0, Raw: map[string]any{"reply": reply, "refused": true}})
+		s.record(userID, aiLogEntry{Feature: featureChat, Status: "success", LatencyMs: 0, Raw: map[string]any{"message": req.Message, "reply": reply, "refused": true, "session_id": req.SessionID}})
 		return dto.ChatResponse{Reply: reply}, nil
 	}
 
@@ -468,7 +480,7 @@ func (s *service) Chat(ctx context.Context, userID uuid.UUID, req dto.ChatReques
 		})
 		if err == nil && len(rows) > 0 {
 			income, expense, byCat := summarise(rows)
-			promptBuilder.WriteString(fmt.Sprintf("Context (last 30 days):\n- income=%.2f, expense=%.2f\n- top categories: %s\n- recent transactions:\n%s\n\n",
+			promptBuilder.WriteString(fmt.Sprintf("Context (last 30 days):\n- income=%.2f, expense=%.2f\n- top expense categories: %s\n- recent transactions:\n%s\n\n",
 				income, expense, topCategoriesString(byCat, 5), sampleRowsString(rows, 15)))
 		}
 	}
@@ -504,13 +516,18 @@ func (s *service) Chat(ctx context.Context, userID uuid.UUID, req dto.ChatReques
 	latency := int(time.Since(start).Milliseconds())
 
 	if err != nil {
-		s.recordAsync(userID, aiLogEntry{Feature: featureChat, Status: "failed", LatencyMs: latency, ErrMsg: err.Error()})
+		s.record(userID, aiLogEntry{Feature: featureChat, Status: "failed", LatencyMs: latency, ErrMsg: err.Error(), Raw: map[string]any{"message": req.Message, "session_id": req.SessionID}})
 		return dto.ChatResponse{}, err
 	}
 	reply = sanitiseChatReply(reply)
 	reply = trimOffTopicPivot(reply)
-	s.recordAsync(userID, aiLogEntry{Feature: featureChat, Status: "success", LatencyMs: latency, Raw: map[string]any{"message": req.Message, "reply": reply}})
+	s.record(userID, aiLogEntry{Feature: featureChat, Status: "success", LatencyMs: latency, Raw: map[string]any{"message": req.Message, "reply": reply, "session_id": req.SessionID}})
 	return dto.ChatResponse{Reply: reply}, nil
+}
+
+func isHelpMessage(msg string) bool {
+	m := strings.ToLower(strings.TrimSpace(msg))
+	return m == "help" || m == "bantuan" || m == "panduan"
 }
 
 func isHardOffTopic(msg string) bool {
@@ -623,7 +640,9 @@ func sanitiseChatReply(s string) string {
 		}
 		return "Maaf, saya belum bisa memberikan jawaban yang tepat. Coba tanyakan ulang dengan kalimat yang berbeda."
 	}
-	return t
+	t = strings.ReplaceAll(t, "**", "")
+	t = strings.ReplaceAll(t, "__", "")
+	return strings.TrimSpace(t)
 }
 
 func (s *service) resolveCategories(userID uuid.UUID, override []string) []string {
@@ -653,7 +672,7 @@ type aiLogEntry struct {
 	Raw        map[string]any
 }
 
-func (s *service) recordAsync(userID uuid.UUID, e aiLogEntry) {
+func (s *service) record(userID uuid.UUID, e aiLogEntry) {
 	if s.logs == nil {
 		return
 	}
@@ -675,14 +694,12 @@ func (s *service) recordAsync(userID uuid.UUID, e aiLogEntry) {
 		ErrorMessage:      truncate(e.ErrMsg, 1900),
 		RawResponse:       rawStr,
 	}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := s.logs.Record(ctx, userID, req); err != nil {
-			slog.Warn("ai: persist log failed",
-				"feature", e.Feature, "user_id", userID, "error", err)
-		}
-	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := s.logs.Record(ctx, userID, req); err != nil {
+		slog.Warn("ai: persist log failed",
+			"feature", e.Feature, "user_id", userID, "error", err)
+	}
 }
 
 func (s *service) logLowConfidence(feature string, confidence float64, parsed map[string]any) {
@@ -716,11 +733,13 @@ func summarise(rows []domain.Transaction) (income, expense float64, byCategory m
 		case "expense":
 			expense += t.Amount
 		}
-		key := "Uncategorized"
-		if t.Category != nil && t.Category.Name != "" {
-			key = t.Category.Name
+		if t.Type == "expense" {
+			key := "Tanpa Kategori"
+			if t.Category != nil && t.Category.Name != "" {
+				key = t.Category.Name
+			}
+			byCategory[key] += t.Amount
 		}
-		byCategory[key] += t.Amount
 	}
 	return
 }
@@ -752,7 +771,7 @@ func sampleRowsString(rows []domain.Transaction, n int) string {
 	lines := make([]string, 0, n)
 	for i := 0; i < n; i++ {
 		t := rows[i]
-		cat := "uncat"
+		cat := "Tanpa Kategori"
 		if t.Category != nil && t.Category.Name != "" {
 			cat = t.Category.Name
 		}

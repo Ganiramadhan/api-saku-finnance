@@ -9,8 +9,8 @@ import (
 )
 
 type Handler struct {
-	service   Service
 	validator *validator.Validator
+	service   Service
 }
 
 func NewHandler(s Service, v *validator.Validator) *Handler {
@@ -31,6 +31,7 @@ func (h *Handler) Login(c *fiber.Ctx) error {
 	if err := httpx.Bind(c, h.validator, &req); err != nil {
 		return err
 	}
+	// println("Login attempt for email:", req.Email) // Debug log
 	resp, err := h.service.Login(c.Context(), req)
 	if err != nil {
 		return err
@@ -57,6 +58,36 @@ func (h *Handler) Register(c *fiber.Ctx) error {
 		return err
 	}
 	return httpx.Created(c, constants.MsgRegister, resp)
+}
+
+// ForgotPassword godoc
+// @Summary   Validate account for password recovery
+// @Tags      Auth
+// @Accept    json
+// @Produce   json
+// @Param     request  body  dto.ForgotPasswordRequest  true  "Email"
+// @Success   200  {object}  dto.APIResponse
+// @Router    /api/v1/auth/forgot-password [post]
+func (h *Handler) ForgotPassword(c *fiber.Ctx) error {
+	var req dto.ForgotPasswordRequest
+	if err := httpx.Bind(c, h.validator, &req); err != nil {
+		return err
+	}
+	if err := h.service.ForgotPassword(c.Context(), req); err != nil {
+		return err
+	}
+	return httpx.OK(c, "Kode OTP pemulihan password sudah dikirim ke email.", nil)
+}
+
+func (h *Handler) ResetPassword(c *fiber.Ctx) error {
+	var req dto.ResetPasswordRequest
+	if err := httpx.Bind(c, h.validator, &req); err != nil {
+		return err
+	}
+	if err := h.service.ResetPassword(c.Context(), req); err != nil {
+		return err
+	}
+	return httpx.OK(c, "Password berhasil diperbarui.", nil)
 }
 
 // ChangePassword godoc

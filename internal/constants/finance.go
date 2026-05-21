@@ -33,6 +33,7 @@ const (
 	// AI logs
 	MsgGetAILogs   = "Successfully retrieved AI logs"
 	MsgGetAILog    = "Successfully retrieved AI log"
+	MsgDeleteAILog = "Successfully deleted AI log"
 	MsgCreateAILog = "Successfully recorded AI processing"
 
 	// Budgets

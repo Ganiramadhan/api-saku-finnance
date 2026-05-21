@@ -7,6 +7,7 @@ import (
 	"github.com/ganiramadhan/starter-go/pkg/httpx"
 	"github.com/ganiramadhan/starter-go/pkg/validator"
 	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
 )
 
 type Handler struct {
@@ -94,6 +95,37 @@ func (h *Handler) ActiveSubscription(c *fiber.Ctx) error {
 		return httpx.OK(c, "No active subscription", nil)
 	}
 	return httpx.OK(c, "Active subscription", out)
+}
+
+func (h *Handler) ConfirmCheckout(c *fiber.Ctx) error {
+	uid, err := httpx.UserID(c)
+	if err != nil {
+		return err
+	}
+	var req dto.ConfirmSubscriptionRequest
+	if err := httpx.Bind(c, h.validator, &req); err != nil {
+		return err
+	}
+	out, err := h.service.ConfirmCheckout(c.Context(), uid, req)
+	if err != nil {
+		return err
+	}
+	return httpx.OK(c, "Subscription confirmed", out)
+}
+
+func (h *Handler) Cancel(c *fiber.Ctx) error {
+	uid, err := httpx.UserID(c)
+	if err != nil {
+		return err
+	}
+	id, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid subscription id")
+	}
+	if err := h.service.Cancel(c.Context(), uid, id); err != nil {
+		return err
+	}
+	return httpx.OK(c, "Subscription cancelled", nil)
 }
 
 // Webhook godoc

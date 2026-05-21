@@ -17,6 +17,8 @@ const scanImagePresignTTL = 6 * time.Hour
 type Service interface {
 	List(ctx context.Context, userID uuid.UUID, feature string, page, limit int) ([]dto.AIProcessingLogResponse, *dto.PaginationMeta, error)
 	ListAll(ctx context.Context, page, limit int) ([]dto.AIProcessingLogResponse, *dto.PaginationMeta, error)
+	Delete(ctx context.Context, userID, id uuid.UUID) error
+	DeleteMany(ctx context.Context, userID uuid.UUID, ids []uuid.UUID) error
 	Record(ctx context.Context, userID uuid.UUID, entry RecordInput) error
 }
 
@@ -115,7 +117,55 @@ func (s *service) ListAll(ctx context.Context, page, limit int) ([]dto.AIProcess
 	return out, dto.NewMeta(page, limit, total), nil
 }
 
+func (s *service) Delete(ctx context.Context, userID, id uuid.UUID) error {
+	logEntry, err := s.repo.FindByID(userID, id)
+	if err != nil {
+		return err
+	}
+	if s.storage != nil && logEntry.RawResponse != "" {
+		var raw map[string]any
+		if err := json.Unmarshal([]byte(logEntry.RawResponse), &raw); err == nil {
+			if key, ok := raw["image_key"].(string); ok && key != "" {
+				if derr := s.storage.Delete(ctx, key); derr != nil {
+					slog.Warn("ailog: failed to delete stored scan image", "log_id", id, "error", derr)
+				}
+			}
+		}
+	}
+	return s.repo.Delete(userID, id)
+}
+
+func (s *service) DeleteMany(ctx context.Context, userID uuid.UUID, ids []uuid.UUID) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	for _, id := range ids {
+		logEntry, err := s.repo.FindByID(userID, id)
+		if err != nil {
+			if err == domain.ErrNotFound {
+				continue
+			}
+			return err
+		}
+		if s.storage != nil && logEntry.RawResponse != "" {
+			var raw map[string]any
+			if err := json.Unmarshal([]byte(logEntry.RawResponse), &raw); err == nil {
+				if key, ok := raw["image_key"].(string); ok && key != "" {
+					if derr := s.storage.Delete(ctx, key); derr != nil {
+						slog.Warn("ailog: failed to delete stored scan image", "log_id", id, "error", derr)
+					}
+				}
+			}
+		}
+	}
+	return s.repo.DeleteMany(userID, ids)
+}
+
 func (s *service) Record(_ context.Context, userID uuid.UUID, in RecordInput) error {
+	rawResponse := in.RawResponse
+	if rawResponse == "" {
+		rawResponse = "{}"
+	}
 	l := domain.AIProcessingLog{
 		UserID:            userID,
 		Feature:           in.Feature,
@@ -127,7 +177,7 @@ func (s *service) Record(_ context.Context, userID uuid.UUID, in RecordInput) er
 		ExtractedMerchant: in.ExtractedMerchant,
 		ExtractedCategory: in.ExtractedCategory,
 		ErrorMessage:      in.ErrorMessage,
-		RawResponse:       in.RawResponse,
+		RawResponse:       rawResponse,
 	}
 	return s.repo.Create(&l)
 }

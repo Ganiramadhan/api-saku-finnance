@@ -36,6 +36,12 @@ func ErrorHandler(c *fiber.Ctx, err error) error {
 	case errors.Is(err, domain.ErrInvalidInput):
 		code = fiber.StatusBadRequest
 		message = err.Error()
+	case errors.Is(err, domain.ErrInvalidOTP):
+		code = fiber.StatusBadRequest
+		message = err.Error()
+	case errors.Is(err, domain.ErrEmailNotRegistered):
+		code = fiber.StatusNotFound
+		message = err.Error()
 	default:
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) {

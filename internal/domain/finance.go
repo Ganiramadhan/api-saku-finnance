@@ -27,6 +27,13 @@ const (
 	BudgetPeriodDaily   = "daily"
 	BudgetPeriodWeekly  = "weekly"
 	BudgetPeriodMonthly = "monthly"
+
+	BillingCycleWeekly  = "weekly"
+	BillingCycleMonthly = "monthly"
+	BillingCycleYearly  = "yearly"
+
+	BillingStatusActive = "active"
+	BillingStatusPaused = "paused"
 )
 
 type Wallet struct {
@@ -203,6 +210,54 @@ type SavingsGoalContribution struct {
 func (c *SavingsGoalContribution) BeforeCreate(_ *gorm.DB) error {
 	if c.ID == uuid.Nil {
 		c.ID = uuid.New()
+	}
+	return nil
+}
+
+type UpcomingBilling struct {
+	ID       uuid.UUID `gorm:"type:uuid;primaryKey"`
+	UserID   uuid.UUID `gorm:"type:uuid;not null;index"`
+	Name     string    `gorm:"type:varchar(120);not null"`
+	Provider string    `gorm:"type:varchar(120)"`
+	Amount   float64   `gorm:"type:decimal(18,2);not null"`
+	Currency string    `gorm:"type:varchar(8);not null;default:'IDR'"`
+	Cycle    string    `gorm:"type:varchar(20);not null;default:'monthly'"`
+	DueDate  time.Time `gorm:"not null;index"`
+	Status   string    `gorm:"type:varchar(20);not null;default:'active'"`
+	Notes    string    `gorm:"type:text"`
+
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	DeletedAt gorm.DeletedAt `gorm:"index"`
+
+	User *User `gorm:"foreignKey:UserID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
+}
+
+type Notification struct {
+	ID        uuid.UUID `gorm:"type:uuid;primaryKey"`
+	UserID    uuid.UUID `gorm:"type:uuid;not null;index"`
+	Type      string    `gorm:"type:varchar(40);not null;index"`
+	Title     string    `gorm:"type:varchar(160);not null"`
+	Message   string    `gorm:"type:text;not null"`
+	RefType   string    `gorm:"type:varchar(40);index"`
+	RefID     string    `gorm:"type:varchar(80);index"`
+	ReadAt    *time.Time
+	CreatedAt time.Time
+	UpdatedAt time.Time
+
+	User *User `gorm:"foreignKey:UserID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
+}
+
+func (n *Notification) BeforeCreate(_ *gorm.DB) error {
+	if n.ID == uuid.Nil {
+		n.ID = uuid.New()
+	}
+	return nil
+}
+
+func (b *UpcomingBilling) BeforeCreate(_ *gorm.DB) error {
+	if b.ID == uuid.Nil {
+		b.ID = uuid.New()
 	}
 	return nil
 }

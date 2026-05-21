@@ -78,13 +78,12 @@ func (s *service) Create(_ context.Context, userID uuid.UUID, req dto.CreateWall
 	}
 	err := s.repo.DB().Transaction(func(tx *gorm.DB) error {
 		txr := s.repo.WithTx(tx)
-		if err := txr.Create(&w); err != nil {
-			return err
-		}
 		if w.IsDefault {
-			return txr.ClearDefault(tx, userID, w.ID)
+			if err := txr.ClearDefault(tx, userID, uuid.Nil); err != nil {
+				return err
+			}
 		}
-		return nil
+		return txr.Create(&w)
 	})
 	if err != nil {
 		return nil, err
@@ -137,13 +136,12 @@ func (s *service) Update(_ context.Context, userID, id uuid.UUID, req dto.Update
 
 	err = s.repo.DB().Transaction(func(tx *gorm.DB) error {
 		txr := s.repo.WithTx(tx)
-		if err := txr.Update(w); err != nil {
-			return err
+		if req.IsDefault != nil && *req.IsDefault {
+			if err := txr.ClearDefault(tx, userID, w.ID); err != nil {
+				return err
+			}
 		}
-		if w.IsDefault {
-			return txr.ClearDefault(tx, userID, w.ID)
-		}
-		return nil
+		return txr.Update(w)
 	})
 	if err != nil {
 		return nil, err

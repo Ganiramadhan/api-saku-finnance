@@ -94,7 +94,7 @@ services:
     environment:
       APP_PORT: 4000
       APP_ENV: development
-      CORS_ORIGINS: http://localhost:3000
+      CORS_ORIGINS: http://localhost:3000,http://localhost:5173,http://127.0.0.1:5173
       DB_HOST: postgres
       DB_PORT: 5432
       DB_USER: postgres
@@ -122,7 +122,7 @@ services:
       MIDTRANS_SERVER_KEY: SB-Mid-server-TYtZRGMWCxUBmrSskjtT27BF
       MIDTRANS_CLIENT_KEY: SB-Mid-client-yptkciOJel1brnqp
       MIDTRANS_IS_PROD: "false"
-      GOOGLE_CLIENT_ID: ""
+      GOOGLE_CLIENT_ID: 856728426002-sctrs5po9q5rlt2gf3fbjn7ufqcbcna6.apps.googleusercontent.com
     ports:
       - "4000:4000"
     networks: [backend]

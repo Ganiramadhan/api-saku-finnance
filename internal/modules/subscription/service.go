@@ -20,6 +20,8 @@ type Service interface {
 	Checkout(ctx context.Context, userID uuid.UUID, req dto.CheckoutRequest) (*dto.CheckoutResponse, error)
 	MySubscriptions(ctx context.Context, userID uuid.UUID) ([]dto.SubscriptionResponse, error)
 	ActiveSubscription(ctx context.Context, userID uuid.UUID) (*dto.SubscriptionResponse, error)
+	ConfirmCheckout(ctx context.Context, userID uuid.UUID, req dto.ConfirmSubscriptionRequest) (*dto.SubscriptionResponse, error)
+	Cancel(ctx context.Context, userID, id uuid.UUID) error
 	// Admin
 	ListAllAdmin(ctx context.Context, limit, offset int) ([]dto.AdminSubscriptionResponse, error)
 	// Webhook
@@ -220,6 +222,42 @@ func (s *service) ActiveSubscription(_ context.Context, userID uuid.UUID) (*dto.
 	return &r, nil
 }
 
+func (s *service) ConfirmCheckout(_ context.Context, userID uuid.UUID, req dto.ConfirmSubscriptionRequest) (*dto.SubscriptionResponse, error) {
+	sub, err := s.repo.FindByOrderID(req.OrderID)
+	if err != nil {
+		return nil, err
+	}
+	if sub.UserID != userID {
+		return nil, domain.ErrUnauthorized
+	}
+	if sub.Status == domain.SubscriptionStatusPending && !s.isProd {
+		s.activate(sub)
+		if err := s.repo.UpdateSubscription(sub); err != nil {
+			return nil, err
+		}
+	}
+	if sub.Plan == nil {
+		if p, err := s.repo.FindPlanByID(sub.PlanID); err == nil {
+			sub.Plan = p
+		}
+	}
+	resp := toSubResp(*sub)
+	return &resp, nil
+}
+
+func (s *service) Cancel(_ context.Context, userID, id uuid.UUID) error {
+	sub, err := s.repo.FindByUserID(userID, id)
+	if err != nil {
+		return err
+	}
+	if sub.Status != domain.SubscriptionStatusActive && sub.Status != domain.SubscriptionStatusPending {
+		return fmt.Errorf("subscription cannot be cancelled from status %s", sub.Status)
+	}
+	sub.Status = domain.SubscriptionStatusCancelled
+	sub.NextBillingAt = nil
+	return s.repo.UpdateSubscription(sub)
+}
+
 func (s *service) HandleWebhook(_ context.Context, p dto.MidtransWebhook) error {
 	if !s.midtrans.VerifySignature(p.OrderID, p.StatusCode, p.GrossAmount, p.SignatureKey) {
 		return fmt.Errorf("invalid signature for order %s", p.OrderID)
@@ -282,4 +320,5 @@ func (s *service) activate(sub *domain.Subscription) {
 		end = end.AddDate(0, 1, 0)
 	}
 	sub.EndsAt = &end
+	sub.NextBillingAt = &end
 }

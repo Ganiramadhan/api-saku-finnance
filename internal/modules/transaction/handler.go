@@ -30,6 +30,7 @@ func (h *Handler) SetExportService(e ExportService) { h.export = e }
 // @Param    wallet_id   query string false "Wallet UUID"
 // @Param    category_id query string false "Category UUID"
 // @Param    type        query string false "income | expense"
+// @Param    source      query string false "manual | ai_ocr | import | api"
 // @Param    from        query string false "ISO date / RFC3339 start"
 // @Param    to          query string false "ISO date / RFC3339 end"
 // @Param    q           query string false "Search description / merchant"

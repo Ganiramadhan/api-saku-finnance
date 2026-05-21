@@ -9,7 +9,10 @@ import (
 type Repository interface {
 	ListByUser(userID uuid.UUID, feature string, page, limit int) ([]domain.AIProcessingLog, int64, error)
 	ListAll(page, limit int) ([]domain.AIProcessingLog, int64, error)
+	FindByID(userID, id uuid.UUID) (*domain.AIProcessingLog, error)
 	Create(log *domain.AIProcessingLog) error
+	Delete(userID, id uuid.UUID) error
+	DeleteMany(userID uuid.UUID, ids []uuid.UUID) error
 }
 
 type repository struct{ db *gorm.DB }
@@ -67,9 +70,45 @@ func (r *repository) ListAll(page, limit int) ([]domain.AIProcessingLog, int64, 
 	return rows, total, err
 }
 
+func (r *repository) FindByID(userID, id uuid.UUID) (*domain.AIProcessingLog, error) {
+	var l domain.AIProcessingLog
+	if err := r.db.Where("id = ? AND user_id = ?", id, userID).First(&l).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, domain.ErrNotFound
+		}
+		return nil, err
+	}
+	return &l, nil
+}
+
 func (r *repository) Create(log *domain.AIProcessingLog) error {
 	if log.ID == uuid.Nil {
 		log.ID = uuid.New()
 	}
 	return r.db.Create(log).Error
+}
+
+func (r *repository) Delete(userID, id uuid.UUID) error {
+	res := r.db.Where("id = ? AND user_id = ?", id, userID).Delete(&domain.AIProcessingLog{})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
+}
+
+func (r *repository) DeleteMany(userID uuid.UUID, ids []uuid.UUID) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	res := r.db.Where("user_id = ? AND id IN ?", userID, ids).Delete(&domain.AIProcessingLog{})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
 }

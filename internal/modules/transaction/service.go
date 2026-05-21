@@ -76,6 +76,7 @@ func (s *service) List(_ context.Context, userID uuid.UUID, q dto.TransactionLis
 		WalletID:   parseUUID(q.WalletID),
 		CategoryID: parseUUID(q.CategoryID),
 		Type:       q.Type,
+		Source:     q.Source,
 		From:       parseTime(q.From),
 		To:         parseTime(q.To),
 		Search:     q.Search,

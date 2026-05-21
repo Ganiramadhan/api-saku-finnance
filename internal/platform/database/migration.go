@@ -33,8 +33,10 @@ func Migrate(db *gorm.DB) error {
 		&domain.Budget{},
 		&domain.SavingsGoal{},
 		&domain.SavingsGoalContribution{},
+		&domain.UpcomingBilling{},
 		&domain.Plan{},
 		&domain.Subscription{},
+		&domain.Notification{},
 		&domain.SplitBill{},
 		&domain.SplitBillParticipant{},
 	); err != nil {
@@ -136,4 +138,9 @@ var indexStatements = []string{
 		ON budgets (user_id, period) WHERE deleted_at IS NULL`,
 	`CREATE INDEX IF NOT EXISTS idx_budgets_wallet_category
 		ON budgets (wallet_id, category_id) WHERE deleted_at IS NULL`,
+	`CREATE INDEX IF NOT EXISTS idx_notifications_user_created
+		ON notifications (user_id, created_at DESC)`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_user_ref_type
+		ON notifications (user_id, ref_type, ref_id, type)
+		WHERE ref_type <> '' AND ref_id <> ''`,
 }

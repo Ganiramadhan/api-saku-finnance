@@ -20,6 +20,7 @@ type Config struct {
 	Claude   ClaudeConfig
 	Google   GoogleConfig
 	Midtrans MidtransConfig
+	Mail     MailConfig
 }
 
 type AppConfig struct {
@@ -78,6 +79,17 @@ type MidtransConfig struct {
 	ServerKey    string
 	ClientKey    string
 	IsProduction bool
+}
+
+type MailConfig struct {
+	Mailer     string
+	Host       string
+	Port       string
+	Username   string
+	Password   string
+	Encryption string
+	FromEmail  string
+	FromName   string
 }
 
 func Load() *Config {
@@ -139,6 +151,16 @@ func Load() *Config {
 			ServerKey:    os.Getenv("MIDTRANS_SERVER_KEY"),
 			ClientKey:    os.Getenv("MIDTRANS_CLIENT_KEY"),
 			IsProduction: os.Getenv("MIDTRANS_IS_PROD") == "true",
+		},
+		Mail: MailConfig{
+			Mailer:     getEnvOrDefault("MAIL_MAILER", "smtp"),
+			Host:       os.Getenv("MAIL_HOST"),
+			Port:       getEnvOrDefault("MAIL_PORT", "587"),
+			Username:   os.Getenv("MAIL_USERNAME"),
+			Password:   os.Getenv("MAIL_PASSWORD"),
+			Encryption: getEnvOrDefault("MAIL_ENCRYPTION", "tls"),
+			FromEmail:  os.Getenv("MAIL_FROM_ADDRESS"),
+			FromName:   getEnvOrDefault("MAIL_FROM_NAME", "SAKU"),
 		},
 	}
 }

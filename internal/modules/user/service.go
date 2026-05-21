@@ -226,7 +226,9 @@ func (s *service) toResponse(ctx context.Context, u domain.User) dto.UserRespons
 		UpdatedAt: u.UpdatedAt,
 	}
 	if u.Photo != "" {
-		if url, err := s.storage.PresignedURL(ctx, u.Photo, photoURLTTL); err == nil {
+		if strings.HasPrefix(u.Photo, "http://") || strings.HasPrefix(u.Photo, "https://") {
+			resp.PhotoURL = u.Photo
+		} else if url, err := s.storage.PresignedURL(ctx, u.Photo, photoURLTTL); err == nil {
 			resp.PhotoURL = url
 		}
 	}

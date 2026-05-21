@@ -30,6 +30,10 @@ type CheckoutResponse struct {
 	IsProduction   bool      `json:"is_production"`
 }
 
+type ConfirmSubscriptionRequest struct {
+	OrderID string `json:"order_id" validate:"required,min=3,max=80"`
+}
+
 type SubscriptionResponse struct {
 	ID            uuid.UUID  `json:"id"`
 	PlanID        uuid.UUID  `json:"plan_id"`

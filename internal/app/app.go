@@ -2,13 +2,16 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/ganiramadhan/starter-go/internal/config"
+	"github.com/ganiramadhan/starter-go/internal/domain"
 	"github.com/ganiramadhan/starter-go/internal/dto"
 	"github.com/ganiramadhan/starter-go/internal/middleware"
 	aimodule "github.com/ganiramadhan/starter-go/internal/modules/ai"
@@ -16,15 +19,18 @@ import (
 	"github.com/ganiramadhan/starter-go/internal/modules/auth"
 	"github.com/ganiramadhan/starter-go/internal/modules/budget"
 	"github.com/ganiramadhan/starter-go/internal/modules/category"
+	"github.com/ganiramadhan/starter-go/internal/modules/notification"
 	"github.com/ganiramadhan/starter-go/internal/modules/savingsgoal"
 	"github.com/ganiramadhan/starter-go/internal/modules/splitbill"
 	"github.com/ganiramadhan/starter-go/internal/modules/subscription"
 	"github.com/ganiramadhan/starter-go/internal/modules/transaction"
+	"github.com/ganiramadhan/starter-go/internal/modules/upcomingbilling"
 	"github.com/ganiramadhan/starter-go/internal/modules/user"
 	"github.com/ganiramadhan/starter-go/internal/modules/wallet"
 	aiplatform "github.com/ganiramadhan/starter-go/internal/platform/ai"
 	"github.com/ganiramadhan/starter-go/internal/platform/cache"
 	"github.com/ganiramadhan/starter-go/internal/platform/database"
+	"github.com/ganiramadhan/starter-go/internal/platform/mailer"
 	"github.com/ganiramadhan/starter-go/internal/platform/storage"
 	"github.com/ganiramadhan/starter-go/internal/routes"
 	"github.com/ganiramadhan/starter-go/pkg/jwt"
@@ -49,6 +55,7 @@ type App struct {
 	storage   storage.Storage
 	validator *validator.Validator
 	subSvc    subscription.Service
+	stopJobs  context.CancelFunc
 }
 
 func New(cfg *config.Config) (*App, error) {
@@ -178,10 +185,22 @@ func (a *App) initHTTP() {
 	goalRepo := savingsgoal.NewRepository(a.db)
 	splitRepo := splitbill.NewRepository(a.db)
 	subRepo := subscription.NewRepository(a.db)
+	billingRepo := upcomingbilling.NewRepository(a.db)
+	notificationRepo := notification.NewRepository(a.db)
+	mailClient := mailer.New(mailer.Config{
+		Mailer:     a.cfg.Mail.Mailer,
+		Host:       a.cfg.Mail.Host,
+		Port:       a.cfg.Mail.Port,
+		Username:   a.cfg.Mail.Username,
+		Password:   a.cfg.Mail.Password,
+		Encryption: a.cfg.Mail.Encryption,
+		FromEmail:  a.cfg.Mail.FromEmail,
+		FromName:   a.cfg.Mail.FromName,
+	})
 
 	// Services
 	userSvc := user.NewService(userRepo, a.storage)
-	authSvc := auth.NewService(userRepo, jwtMgr, a.cfg.Google.ClientID)
+	authSvc := auth.NewService(userRepo, jwtMgr, a.cfg.Google.ClientID, mailClient)
 	walletSvc := wallet.NewService(walletRepo)
 	categorySvc := category.NewService(categoryRepo)
 	txnSvc := transaction.NewService(txnRepo, walletRepo, categoryRepo)
@@ -190,6 +209,8 @@ func (a *App) initHTTP() {
 	budgetSvc := budget.NewService(budgetRepo, walletRepo, categoryRepo)
 	goalSvc := savingsgoal.NewService(goalRepo)
 	splitSvc := splitbill.NewService(splitRepo)
+	billingSvc := upcomingbilling.NewService(billingRepo)
+	notificationSvc := notification.NewService(notificationRepo)
 	midtransClient := subscription.NewMidtransClient(a.cfg.Midtrans.ServerKey, a.cfg.Midtrans.IsProduction)
 	subSvc := subscription.NewService(subRepo, userRepo, midtransClient, a.cfg.Midtrans.ClientKey, a.cfg.Midtrans.IsProduction)
 	a.subSvc = subSvc
@@ -212,8 +233,117 @@ func (a *App) initHTTP() {
 		SavingsGoal:  savingsgoal.NewHandler(goalSvc, a.validator),
 		Subscription: subscription.NewHandler(subSvc, a.validator),
 		SplitBill:    splitbill.NewHandler(splitSvc, a.validator),
+		Billing:      upcomingbilling.NewHandler(billingSvc, a.validator),
 		AI:           aimodule.NewHandler(aiSvc, a.validator),
+		Notification: notification.NewHandler(notificationSvc, a.validator),
 	}, jwtMgr)
+
+	a.startReminderJob(billingRepo, subRepo, notificationSvc, mailClient)
+}
+
+func (a *App) startReminderJob(
+	billingRepo upcomingbilling.Repository,
+	subRepo subscription.Repository,
+	notificationSvc notification.Service,
+	mailClient mailer.Mailer,
+) {
+	ctx, cancel := context.WithCancel(context.Background())
+	a.stopJobs = cancel
+	go func() {
+		a.runReminderPass(ctx, billingRepo, subRepo, notificationSvc, mailClient)
+		ticker := time.NewTicker(24 * time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				a.runReminderPass(ctx, billingRepo, subRepo, notificationSvc, mailClient)
+			}
+		}
+	}()
+}
+
+func (a *App) runReminderPass(
+	ctx context.Context,
+	billingRepo upcomingbilling.Repository,
+	subRepo subscription.Repository,
+	notificationSvc notification.Service,
+	mailClient mailer.Mailer,
+) {
+	today := time.Now().UTC()
+	if billings, err := billingRepo.ListActiveWithUsers(); err != nil {
+		log.Printf("reminder: list upcoming billings: %v", err)
+	} else {
+		for _, item := range billings {
+			if item.User == nil || daysUntilUTC(today, item.DueDate) != 7 {
+				continue
+			}
+			title := "Reminder tagihan 7 hari lagi"
+			message := fmt.Sprintf("%s jatuh tempo pada %s dengan nominal %s.", item.Name, item.DueDate.Format("02 Jan 2006"), formatMoney(item.Amount, item.Currency))
+			_ = notificationSvc.Create(ctx, domain.Notification{
+				UserID: item.UserID, Type: "upcoming_billing_reminder", Title: title, Message: message, RefType: "upcoming_billing", RefID: item.ID.String(),
+			})
+			_ = mailClient.Send(item.User.Email, title, message+"\n\nBuka SAKU untuk mengecek cashflow dan menyiapkan pembayaran.")
+		}
+	}
+
+	subs, err := subRepo.ListActiveForReminder()
+	if err != nil {
+		log.Printf("reminder: list subscriptions: %v", err)
+		return
+	}
+	for _, sub := range subs {
+		if sub.User == nil || sub.Plan == nil {
+			continue
+		}
+		due := sub.NextBillingAt
+		if due == nil {
+			due = sub.EndsAt
+		}
+		if due == nil {
+			continue
+		}
+		window := 7
+		if sub.Plan.Period == domain.PlanPeriodYearly {
+			window = 30
+		}
+		if daysUntilUTC(today, *due) != window {
+			continue
+		}
+		title := fmt.Sprintf("Reminder langganan %d hari lagi", window)
+		message := fmt.Sprintf("Langganan %s akan diperbarui pada %s dengan nominal %s.", sub.Plan.Name, due.Format("02 Jan 2006"), formatMoney(sub.Amount, sub.Currency))
+		_ = notificationSvc.Create(ctx, domain.Notification{
+			UserID: sub.UserID, Type: "subscription_reminder", Title: title, Message: message, RefType: "subscription", RefID: sub.ID.String(),
+		})
+		_ = mailClient.Send(sub.User.Email, title, message+"\n\nBuka SAKU untuk mengelola langgananmu.")
+	}
+}
+
+func formatMoney(amount float64, currency string) string {
+	if strings.EqualFold(currency, "IDR") || currency == "" {
+		return "Rp " + formatThousandsID(amount)
+	}
+	return fmt.Sprintf("%.0f %s", amount, currency)
+}
+
+func formatThousandsID(amount float64) string {
+	raw := fmt.Sprintf("%.0f", amount)
+	var b strings.Builder
+	for i, r := range raw {
+		if i > 0 && (len(raw)-i)%3 == 0 {
+			b.WriteByte('.')
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+func daysUntilUTC(now, target time.Time) int {
+	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	due := target.UTC()
+	end := time.Date(due.Year(), due.Month(), due.Day(), 0, 0, 0, 0, time.UTC)
+	return int(end.Sub(start).Hours() / 24)
 }
 
 func (a *App) Run() error {
@@ -243,6 +373,9 @@ func (a *App) Run() error {
 }
 
 func (a *App) close() {
+	if a.stopJobs != nil {
+		a.stopJobs()
+	}
 	if a.cache != nil {
 		if err := a.cache.Close(); err != nil {
 			log.Printf("cache: close: %v", err)

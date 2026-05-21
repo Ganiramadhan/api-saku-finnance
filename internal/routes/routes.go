@@ -7,10 +7,12 @@ import (
 	"github.com/ganiramadhan/starter-go/internal/modules/auth"
 	"github.com/ganiramadhan/starter-go/internal/modules/budget"
 	"github.com/ganiramadhan/starter-go/internal/modules/category"
+	"github.com/ganiramadhan/starter-go/internal/modules/notification"
 	"github.com/ganiramadhan/starter-go/internal/modules/savingsgoal"
 	"github.com/ganiramadhan/starter-go/internal/modules/splitbill"
 	"github.com/ganiramadhan/starter-go/internal/modules/subscription"
 	"github.com/ganiramadhan/starter-go/internal/modules/transaction"
+	"github.com/ganiramadhan/starter-go/internal/modules/upcomingbilling"
 	"github.com/ganiramadhan/starter-go/internal/modules/user"
 	"github.com/ganiramadhan/starter-go/internal/modules/wallet"
 	"github.com/ganiramadhan/starter-go/pkg/jwt"
@@ -28,7 +30,9 @@ type Handlers struct {
 	SavingsGoal  *savingsgoal.Handler
 	Subscription *subscription.Handler
 	SplitBill    *splitbill.Handler
+	Billing      *upcomingbilling.Handler
 	AI           *ai.Handler
+	Notification *notification.Handler
 }
 
 func Register(app *fiber.App, h Handlers, jwtMgr *jwt.Manager) {
@@ -41,6 +45,8 @@ func Register(app *fiber.App, h Handlers, jwtMgr *jwt.Manager) {
 	authPub.Post("/login", h.Auth.Login)
 	authPub.Post("/register", h.Auth.Register)
 	authPub.Post("/google", h.Auth.GoogleLogin)
+	authPub.Post("/forgot-password", h.Auth.ForgotPassword)
+	authPub.Post("/reset-password", h.Auth.ResetPassword)
 
 	// Public subscription catalog + Midtrans webhook
 	subsPub := v1.Group("/subscriptions")
@@ -82,6 +88,8 @@ func Register(app *fiber.App, h Handlers, jwtMgr *jwt.Manager) {
 
 	aiLogs := v1.Group("/ai-logs", authRequired)
 	aiLogs.Get("", h.AILog.List)
+	aiLogs.Post("/bulk-delete", h.AILog.DeleteMany)
+	aiLogs.Delete("/:id", h.AILog.Delete)
 
 	budgets := v1.Group("/budgets", authRequired)
 	budgets.Get("", h.Budget.List)
@@ -89,6 +97,17 @@ func Register(app *fiber.App, h Handlers, jwtMgr *jwt.Manager) {
 	budgets.Get("/:id", h.Budget.Get)
 	budgets.Put("/:id", h.Budget.Update)
 	budgets.Delete("/:id", h.Budget.Delete)
+
+	billings := v1.Group("/upcoming-billings", authRequired)
+	billings.Get("", h.Billing.List)
+	billings.Post("", h.Billing.Create)
+	billings.Put("/:id", h.Billing.Update)
+	billings.Delete("/:id", h.Billing.Delete)
+
+	notifications := v1.Group("/notifications", authRequired)
+	notifications.Get("", h.Notification.List)
+	notifications.Post("/read-all", h.Notification.MarkAllRead)
+	notifications.Post("/:id/read", h.Notification.MarkRead)
 
 	goals := v1.Group("/savings-goals", authRequired)
 	goals.Get("", h.SavingsGoal.List)
@@ -104,6 +123,8 @@ func Register(app *fiber.App, h Handlers, jwtMgr *jwt.Manager) {
 	subs.Get("/me", h.Subscription.MySubscriptions)
 	subs.Get("/me/active", h.Subscription.ActiveSubscription)
 	subs.Post("/checkout", h.Subscription.Checkout)
+	subs.Post("/confirm", h.Subscription.ConfirmCheckout)
+	subs.Post("/:id/cancel", h.Subscription.Cancel)
 
 	// AI categorization
 	aiGroup := v1.Group("/ai", authRequired)
@@ -112,6 +133,9 @@ func Register(app *fiber.App, h Handlers, jwtMgr *jwt.Manager) {
 	aiGroup.Post("/insights", h.AI.Insights)
 	aiGroup.Post("/suggest-budget", h.AI.SuggestBudget)
 	aiGroup.Post("/chat", h.AI.Chat)
+	aiGroup.Get("/chat-history", h.AILog.ListChatHistory)
+	aiGroup.Get("/nlp-history", h.AILog.ListNLPHistory)
+	aiGroup.Get("/scan-receipt-history", h.AILog.ListScanReceiptHistory)
 
 	// Split Bill — owner-scoped CRUD + WhatsApp share.
 	split := v1.Group("/split-bills", authRequired)
