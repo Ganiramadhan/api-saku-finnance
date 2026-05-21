@@ -2,6 +2,7 @@ package wallet
 
 import (
 	"context"
+	"time"
 
 	"github.com/ganiramadhan/starter-go/internal/domain"
 	"github.com/ganiramadhan/starter-go/internal/dto"
@@ -22,6 +23,14 @@ type service struct{ repo Repository }
 func NewService(r Repository) Service { return &service{repo: r} }
 
 func toResp(w domain.Wallet) dto.WalletResponse {
+	var targetName *string
+	var targetAmount *float64
+	var targetDeadline *time.Time
+	if w.Target != nil {
+		targetName = &w.Target.Name
+		targetAmount = &w.Target.Amount
+		targetDeadline = w.Target.Deadline
+	}
 	return dto.WalletResponse{
 		ID:             w.ID,
 		UserID:         w.UserID,
@@ -30,9 +39,9 @@ func toResp(w domain.Wallet) dto.WalletResponse {
 		Currency:       w.Currency,
 		Balance:        w.BalanceCached,
 		IsDefault:      w.IsDefault,
-		TargetName:     w.TargetName,
-		TargetAmount:   w.TargetAmount,
-		TargetDeadline: w.TargetDeadline,
+		TargetName:     targetName,
+		TargetAmount:   targetAmount,
+		TargetDeadline: targetDeadline,
 		CreatedAt:      w.CreatedAt,
 		UpdatedAt:      w.UpdatedAt,
 	}
@@ -64,17 +73,18 @@ func (s *service) Create(_ context.Context, userID uuid.UUID, req dto.CreateWall
 	if currency == "" {
 		currency = "IDR"
 	}
+	walletType := req.Type
+	if walletType == "" {
+		walletType = domain.WalletTypeCash
+	}
 	w := domain.Wallet{
-		ID:             uuid.New(),
-		UserID:         userID,
-		Name:           req.Name,
-		Type:           req.Type,
-		Currency:       currency,
-		BalanceCached:  req.Balance,
-		IsDefault:      req.IsDefault,
-		TargetName:     req.TargetName,
-		TargetAmount:   req.TargetAmount,
-		TargetDeadline: req.TargetDeadline,
+		ID:            uuid.New(),
+		UserID:        userID,
+		Name:          req.Name,
+		Type:          walletType,
+		Currency:      currency,
+		BalanceCached: req.Balance,
+		IsDefault:     req.IsDefault,
 	}
 	err := s.repo.DB().Transaction(func(tx *gorm.DB) error {
 		txr := s.repo.WithTx(tx)
@@ -83,12 +93,19 @@ func (s *service) Create(_ context.Context, userID uuid.UUID, req dto.CreateWall
 				return err
 			}
 		}
-		return txr.Create(&w)
+		if err := txr.Create(&w); err != nil {
+			return err
+		}
+		return upsertWalletTarget(tx, w.ID, req.TargetName, req.TargetAmount, req.TargetDeadline)
 	})
 	if err != nil {
 		return nil, err
 	}
-	r := toResp(w)
+	created, err := s.repo.FindByID(userID, w.ID)
+	if err != nil {
+		return nil, err
+	}
+	r := toResp(*created)
 	return &r, nil
 }
 
@@ -112,27 +129,6 @@ func (s *service) Update(_ context.Context, userID, id uuid.UUID, req dto.Update
 	if req.IsDefault != nil {
 		w.IsDefault = *req.IsDefault
 	}
-	if req.TargetName != nil {
-		if *req.TargetName == "" {
-			w.TargetName = nil
-		} else {
-			w.TargetName = req.TargetName
-		}
-	}
-	if req.TargetAmount != nil {
-		if *req.TargetAmount == 0 {
-			w.TargetAmount = nil
-		} else {
-			w.TargetAmount = req.TargetAmount
-		}
-	}
-	if req.TargetDeadline != nil {
-		if req.TargetDeadline.IsZero() {
-			w.TargetDeadline = nil
-		} else {
-			w.TargetDeadline = req.TargetDeadline
-		}
-	}
 
 	err = s.repo.DB().Transaction(func(tx *gorm.DB) error {
 		txr := s.repo.WithTx(tx)
@@ -141,8 +137,18 @@ func (s *service) Update(_ context.Context, userID, id uuid.UUID, req dto.Update
 				return err
 			}
 		}
-		return txr.Update(w)
+		if err := txr.Update(w); err != nil {
+			return err
+		}
+		if req.TargetName != nil || req.TargetAmount != nil || req.TargetDeadline != nil {
+			return upsertWalletTarget(tx, w.ID, req.TargetName, req.TargetAmount, req.TargetDeadline)
+		}
+		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
+	w, err = s.repo.FindByID(userID, id)
 	if err != nil {
 		return nil, err
 	}
@@ -152,4 +158,45 @@ func (s *service) Update(_ context.Context, userID, id uuid.UUID, req dto.Update
 
 func (s *service) Delete(_ context.Context, userID, id uuid.UUID) error {
 	return s.repo.Delete(userID, id)
+}
+
+func upsertWalletTarget(tx *gorm.DB, walletID uuid.UUID, name *string, amount *float64, deadline *time.Time) error {
+	if name == nil && amount == nil && deadline == nil {
+		return nil
+	}
+	if (name == nil || *name == "") && (amount == nil || *amount <= 0) && (deadline == nil || deadline.IsZero()) {
+		return tx.Where("wallet_id = ?", walletID).Delete(&domain.WalletTarget{}).Error
+	}
+
+	var target domain.WalletTarget
+	err := tx.Where("wallet_id = ?", walletID).First(&target).Error
+	if err != nil && err != gorm.ErrRecordNotFound {
+		return err
+	}
+	if err == gorm.ErrRecordNotFound {
+		target = domain.WalletTarget{WalletID: walletID}
+	}
+	if name != nil {
+		target.Name = *name
+	}
+	if amount != nil {
+		target.Amount = *amount
+	}
+	if deadline != nil {
+		if deadline.IsZero() {
+			target.Deadline = nil
+		} else {
+			target.Deadline = deadline
+		}
+	}
+	if target.Name == "" {
+		target.Name = "Kantong Tujuan"
+	}
+	if target.Amount <= 0 {
+		return tx.Where("wallet_id = ?", walletID).Delete(&domain.WalletTarget{}).Error
+	}
+	if target.ID == uuid.Nil {
+		return tx.Create(&target).Error
+	}
+	return tx.Save(&target).Error
 }

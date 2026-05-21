@@ -304,8 +304,20 @@ CRITICAL RULES — read carefully BEFORE deciding the type and category:
    amount + merchant). If any of these is ambiguous, set confidence below 0.7
    so the UI can ask the user to review.
 
+7. Description rules:
+   - For store receipts, describe the purchase naturally, e.g. "Belanja Indomaret: roti, susu".
+   - For bank/e-wallet transfer receipts, DO NOT use "belanja" unless it is clearly a merchant payment.
+     Use transfer wording, e.g. "Transfer ke BUDI", "Mutasi masuk dari PT ABC",
+     "Top up GoPay", or "Pembayaran QRIS ke Merchant".
+
+8. "line_items" should be informative:
+   - For store receipts, include item name, quantity when visible, final price, and discount when visible
+     in one short string, e.g. "Susu UHT x2 - Rp 24.000 (diskon Rp 3.000)".
+   - For transfer/bank mutation receipts, include fee/admin, source account, destination account,
+     reference number, or status lines when visible.
+
 Return ONLY this JSON (no commentary, no markdown fences):
-{"amount": number, "merchant_name": string, "category": string, "type": "income"|"expense", "currency": string, "date": "YYYY-MM-DD", "confidence": 0..1, "line_items": ["item name"], "ocr_text": string}`,
+{"amount": number, "merchant_name": string, "category": string, "type": "income"|"expense", "currency": string, "date": "YYYY-MM-DD", "confidence": 0..1, "description": string, "line_items": ["item/fee/detail with price or discount when visible"], "ocr_text": string}`,
 		strings.Join(cats, ", "))
 
 	start := time.Now()
@@ -326,6 +338,7 @@ Return ONLY this JSON (no commentary, no markdown fences):
 		Currency:     defaultIfEmpty(getString(parsed, "currency"), "IDR"),
 		Date:         getString(parsed, "date"),
 		Confidence:   getNumber(parsed, "confidence"),
+		Description:  getString(parsed, "description"),
 		OCRText:      getString(parsed, "ocr_text"),
 		LineItems:    getStringSlice(parsed, "line_items"),
 		RawResponse:  parsed,

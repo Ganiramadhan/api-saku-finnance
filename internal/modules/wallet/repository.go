@@ -27,7 +27,8 @@ func (r *repository) WithTx(tx *gorm.DB) Repository { return &repository{db: tx}
 
 func (r *repository) List(userID uuid.UUID) ([]domain.Wallet, error) {
 	var out []domain.Wallet
-	err := r.db.Where("user_id = ?", userID).
+	err := r.db.Preload("Target").
+		Where("user_id = ?", userID).
 		Order("is_default DESC, created_at DESC").
 		Find(&out).Error
 	return out, err
@@ -35,7 +36,7 @@ func (r *repository) List(userID uuid.UUID) ([]domain.Wallet, error) {
 
 func (r *repository) FindByID(userID, id uuid.UUID) (*domain.Wallet, error) {
 	var w domain.Wallet
-	if err := r.db.Where("id = ? AND user_id = ?", id, userID).First(&w).Error; err != nil {
+	if err := r.db.Preload("Target").Where("id = ? AND user_id = ?", id, userID).First(&w).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return nil, domain.ErrNotFound
 		}

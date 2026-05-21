@@ -20,9 +20,12 @@ const (
 	AIStatusSuccess = "success"
 	AIStatusFailed  = "failed"
 
-	WalletTypePersonal = "personal"
-	WalletTypeBusiness = "business"
-	WalletTypeShared   = "shared"
+	WalletTypeEWallet     = "e_wallet"
+	WalletTypeBankAccount = "bank_account"
+	WalletTypeCash        = "cash"
+	WalletTypeCreditCard  = "credit_card"
+	WalletTypeInvestment  = "investment"
+	WalletTypeSavings     = "savings"
 
 	BudgetPeriodDaily   = "daily"
 	BudgetPeriodWeekly  = "weekly"
@@ -37,22 +40,20 @@ const (
 )
 
 type Wallet struct {
-	ID             uuid.UUID `gorm:"type:uuid;primaryKey"`
-	UserID         uuid.UUID `gorm:"type:uuid;not null;index"`
-	Name           string    `gorm:"type:varchar(120);not null"`
-	Type           string    `gorm:"type:wallet_type_enum;not null;default:'personal'"`
-	Currency       string    `gorm:"type:varchar(8);not null;default:'IDR'"`
-	BalanceCached  float64   `gorm:"type:decimal(18,2);not null;default:0"`
-	IsDefault      bool      `gorm:"not null;default:false"`
-	TargetName     *string   `gorm:"type:varchar(120)"`
-	TargetAmount   *float64  `gorm:"type:decimal(18,2)"`
-	TargetDeadline *time.Time
+	ID            uuid.UUID `gorm:"type:uuid;primaryKey"`
+	UserID        uuid.UUID `gorm:"type:uuid;not null;index"`
+	Name          string    `gorm:"type:varchar(120);not null"`
+	Type          string    `gorm:"type:varchar(32);not null;default:'cash'"`
+	Currency      string    `gorm:"type:varchar(8);not null;default:'IDR'"`
+	BalanceCached float64   `gorm:"type:decimal(18,2);not null;default:0"`
+	IsDefault     bool      `gorm:"not null;default:false"`
 
 	CreatedAt time.Time
 	UpdatedAt time.Time
 	DeletedAt gorm.DeletedAt `gorm:"index"`
 
-	User *User `gorm:"foreignKey:UserID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
+	User   *User         `gorm:"foreignKey:UserID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
+	Target *WalletTarget `gorm:"foreignKey:WalletID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
 }
 
 func (w *Wallet) BeforeCreate(_ *gorm.DB) error {
@@ -62,11 +63,30 @@ func (w *Wallet) BeforeCreate(_ *gorm.DB) error {
 	return nil
 }
 
+type WalletTarget struct {
+	ID        uuid.UUID `gorm:"type:uuid;primaryKey"`
+	WalletID  uuid.UUID `gorm:"type:uuid;not null;uniqueIndex"`
+	Name      string    `gorm:"type:varchar(120);not null"`
+	Amount    float64   `gorm:"type:decimal(18,2);not null"`
+	Deadline  *time.Time
+	CreatedAt time.Time
+	UpdatedAt time.Time
+
+	Wallet *Wallet `gorm:"foreignKey:WalletID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
+}
+
+func (t *WalletTarget) BeforeCreate(_ *gorm.DB) error {
+	if t.ID == uuid.Nil {
+		t.ID = uuid.New()
+	}
+	return nil
+}
+
 type Category struct {
 	ID       uuid.UUID  `gorm:"type:uuid;primaryKey"`
 	UserID   *uuid.UUID `gorm:"type:uuid;index"`
 	Name     string     `gorm:"type:varchar(120);not null"`
-	Type     string     `gorm:"type:transaction_type_enum;not null;index"`
+	Type     string     `gorm:"type:varchar(16);not null;index"`
 	Icon     string     `gorm:"type:varchar(64)"`
 	Color    string     `gorm:"type:varchar(16)"`
 	IsSystem bool       `gorm:"not null;default:false"`
@@ -90,12 +110,12 @@ type Transaction struct {
 	WalletID        uuid.UUID `gorm:"type:uuid;not null;index"`
 	CategoryID      uuid.UUID `gorm:"type:uuid;not null;index"`
 	Amount          float64   `gorm:"type:decimal(18,2);not null"`
-	Type            string    `gorm:"type:transaction_type_enum;not null"`
+	Type            string    `gorm:"type:varchar(16);not null"`
 	Description     string    `gorm:"type:text"`
 	MerchantName    string    `gorm:"type:varchar(255)"`
 	TransactionDate time.Time `gorm:"not null;index"`
 
-	Source          string   `gorm:"type:transaction_source_enum;not null;default:'manual'"`
+	Source          string   `gorm:"type:varchar(20);not null;default:'manual'"`
 	ConfidenceScore *float64 `gorm:"type:numeric(4,3)"`
 
 	CreatedAt time.Time
@@ -103,7 +123,7 @@ type Transaction struct {
 	DeletedAt gorm.DeletedAt `gorm:"index"`
 
 	Wallet   *Wallet   `gorm:"foreignKey:WalletID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
-	Category *Category `gorm:"foreignKey:CategoryID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT"`
+	Category *Category `gorm:"foreignKey:CategoryID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
 }
 
 func (t *Transaction) BeforeCreate(_ *gorm.DB) error {
@@ -118,7 +138,7 @@ type AIProcessingLog struct {
 	UserID  uuid.UUID `gorm:"type:uuid;not null;index"`
 	Feature string    `gorm:"type:varchar(32);not null;index;default:'categorize'"`
 
-	Status            string   `gorm:"type:ai_status_enum;not null;index;default:'pending'"`
+	Status            string   `gorm:"type:varchar(20);not null;index;default:'pending'"`
 	ExtractedAmount   *float64 `gorm:"type:decimal(18,2)"`
 	ExtractedMerchant string   `gorm:"type:varchar(255)"`
 	ExtractedCategory string   `gorm:"type:varchar(120)"`
@@ -150,7 +170,7 @@ type Budget struct {
 	CategoryID uuid.UUID `gorm:"type:uuid;not null;index"`
 
 	LimitAmount float64 `gorm:"type:decimal(18,2);not null"`
-	Period      string  `gorm:"type:budget_period_enum;not null;default:'monthly'"`
+	Period      string  `gorm:"type:varchar(20);not null;default:'monthly'"`
 
 	CreatedAt time.Time
 	UpdatedAt time.Time
@@ -158,7 +178,7 @@ type Budget struct {
 
 	User     *User     `gorm:"foreignKey:UserID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
 	Wallet   *Wallet   `gorm:"foreignKey:WalletID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
-	Category *Category `gorm:"foreignKey:CategoryID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT"`
+	Category *Category `gorm:"foreignKey:CategoryID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
 }
 
 func (b *Budget) BeforeCreate(_ *gorm.DB) error {
@@ -186,7 +206,7 @@ type SavingsGoal struct {
 	DeletedAt   gorm.DeletedAt `gorm:"index"`
 
 	User   *User   `gorm:"foreignKey:UserID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
-	Wallet *Wallet `gorm:"foreignKey:WalletID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:SET NULL"`
+	Wallet *Wallet `gorm:"foreignKey:WalletID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
 }
 
 func (g *SavingsGoal) BeforeCreate(_ *gorm.DB) error {

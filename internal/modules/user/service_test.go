@@ -55,7 +55,7 @@ func (r *fakeRepo) FindByEmail(email string) (*domain.User, error) {
 
 func (r *fakeRepo) FindByReferralCode(code string) (*domain.User, error) {
 	for _, u := range r.users {
-		if u.ReferralCode == strings.ToUpper(strings.TrimSpace(code)) {
+		if u.Referral != nil && u.Referral.Code == strings.ToUpper(strings.TrimSpace(code)) {
 			copy := *u
 			return &copy, nil
 		}
@@ -84,12 +84,44 @@ func (r *fakeRepo) Update(u *domain.User) error {
 	return nil
 }
 
+func (r *fakeRepo) UpsertResetOTP(userID uuid.UUID, codeHash string, expiresAt time.Time) error {
+	u, ok := r.users[userID]
+	if !ok {
+		return domain.ErrNotFound
+	}
+	u.OTP = &domain.UserOTP{UserID: userID, Purpose: "password_reset", CodeHash: codeHash, ExpiresAt: expiresAt}
+	return nil
+}
+
+func (r *fakeRepo) ClearResetOTP(userID uuid.UUID) error {
+	u, ok := r.users[userID]
+	if !ok {
+		return domain.ErrNotFound
+	}
+	u.OTP = nil
+	return nil
+}
+
+func (r *fakeRepo) EnsureReferralCode(userID uuid.UUID, code string) (*domain.UserReferral, error) {
+	u, ok := r.users[userID]
+	if !ok {
+		return nil, domain.ErrNotFound
+	}
+	if u.Referral == nil {
+		u.Referral = &domain.UserReferral{UserID: userID, Code: strings.ToUpper(strings.TrimSpace(code))}
+	}
+	return u.Referral, nil
+}
+
 func (r *fakeRepo) AddReferralReward(id uuid.UUID, amount int64) error {
 	u, ok := r.users[id]
 	if !ok {
 		return domain.ErrNotFound
 	}
-	u.ReferralReward += amount
+	if u.Referral == nil {
+		u.Referral = &domain.UserReferral{UserID: id}
+	}
+	u.Referral.Reward += amount
 	return nil
 }
 

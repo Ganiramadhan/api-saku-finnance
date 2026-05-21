@@ -20,6 +20,7 @@ type SplitBill struct {
 	UpdatedAt time.Time
 	DeletedAt gorm.DeletedAt `gorm:"index"`
 
+	Owner        *User                  `gorm:"foreignKey:OwnerUserID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
 	Participants []SplitBillParticipant `gorm:"foreignKey:SplitBillID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
 }
 
@@ -41,6 +42,8 @@ type SplitBillParticipant struct {
 
 	CreatedAt time.Time
 	UpdatedAt time.Time
+
+	SplitBill *SplitBill `gorm:"foreignKey:SplitBillID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
 }
 
 func (p *SplitBillParticipant) BeforeCreate(_ *gorm.DB) error {

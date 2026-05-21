@@ -2,6 +2,7 @@ package user
 
 import (
 	"strings"
+	"time"
 
 	"github.com/ganiramadhan/starter-go/internal/domain"
 	"github.com/google/uuid"
@@ -15,6 +16,9 @@ type Repository interface {
 	FindByReferralCode(code string) (*domain.User, error)
 	Create(u *domain.User) error
 	Update(u *domain.User) error
+	UpsertResetOTP(userID uuid.UUID, codeHash string, expiresAt time.Time) error
+	ClearResetOTP(userID uuid.UUID) error
+	EnsureReferralCode(userID uuid.UUID, code string) (*domain.UserReferral, error)
 	AddReferralReward(id uuid.UUID, amount int64) error
 	Delete(id uuid.UUID) error
 }
@@ -30,7 +34,7 @@ func NewRepository(db *gorm.DB) Repository {
 func (r *repository) FindAll(page, limit int, search string) ([]domain.User, int64, error) {
 	var users []domain.User
 	var total int64
-	q := r.db.Model(&domain.User{})
+	q := r.db.Model(&domain.User{}).Preload("Referral")
 	if s := strings.TrimSpace(search); s != "" {
 		like := "%" + s + "%"
 		q = q.Where("name ILIKE ? OR email ILIKE ?", like, like)
@@ -45,7 +49,7 @@ func (r *repository) FindAll(page, limit int, search string) ([]domain.User, int
 
 func (r *repository) FindByID(id uuid.UUID) (*domain.User, error) {
 	var u domain.User
-	if err := r.db.Where("id = ?", id).First(&u).Error; err != nil {
+	if err := r.db.Preload("OTP").Preload("Referral").Where("id = ?", id).First(&u).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return nil, domain.ErrNotFound
 		}
@@ -56,7 +60,7 @@ func (r *repository) FindByID(id uuid.UUID) (*domain.User, error) {
 
 func (r *repository) FindByEmail(email string) (*domain.User, error) {
 	var u domain.User
-	if err := r.db.Where("email = ?", email).First(&u).Error; err != nil {
+	if err := r.db.Preload("OTP").Preload("Referral").Where("email = ?", email).First(&u).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return nil, domain.ErrNotFound
 		}
@@ -66,24 +70,69 @@ func (r *repository) FindByEmail(email string) (*domain.User, error) {
 }
 
 func (r *repository) FindByReferralCode(code string) (*domain.User, error) {
-	var u domain.User
-	if err := r.db.Where("referral_code = ?", strings.ToUpper(strings.TrimSpace(code))).First(&u).Error; err != nil {
+	var ref domain.UserReferral
+	if err := r.db.Preload("User").Where("code = ?", strings.ToUpper(strings.TrimSpace(code))).First(&ref).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return nil, domain.ErrNotFound
 		}
 		return nil, err
 	}
-	return &u, nil
+	if ref.User == nil {
+		return nil, domain.ErrNotFound
+	}
+	ref.User.Referral = &ref
+	return ref.User, nil
 }
 
 func (r *repository) Create(u *domain.User) error { return r.db.Create(u).Error }
 
 func (r *repository) Update(u *domain.User) error { return r.db.Save(u).Error }
 
+func (r *repository) UpsertResetOTP(userID uuid.UUID, codeHash string, expiresAt time.Time) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("user_id = ? AND purpose = ?", userID, "password_reset").Delete(&domain.UserOTP{}).Error; err != nil {
+			return err
+		}
+		return tx.Create(&domain.UserOTP{
+			UserID:    userID,
+			Purpose:   "password_reset",
+			CodeHash:  codeHash,
+			ExpiresAt: expiresAt,
+		}).Error
+	})
+}
+
+func (r *repository) ClearResetOTP(userID uuid.UUID) error {
+	return r.db.Where("user_id = ? AND purpose = ?", userID, "password_reset").Delete(&domain.UserOTP{}).Error
+}
+
+func (r *repository) EnsureReferralCode(userID uuid.UUID, code string) (*domain.UserReferral, error) {
+	code = strings.ToUpper(strings.TrimSpace(code))
+	var ref domain.UserReferral
+	err := r.db.Where("user_id = ?", userID).First(&ref).Error
+	if err == nil {
+		if ref.Code == "" && code != "" {
+			ref.Code = code
+			if err := r.db.Save(&ref).Error; err != nil {
+				return nil, err
+			}
+		}
+		return &ref, nil
+	}
+	if err != gorm.ErrRecordNotFound {
+		return nil, err
+	}
+	ref = domain.UserReferral{UserID: userID, Code: code}
+	if err := r.db.Create(&ref).Error; err != nil {
+		return nil, err
+	}
+	return &ref, nil
+}
+
 func (r *repository) AddReferralReward(id uuid.UUID, amount int64) error {
-	return r.db.Model(&domain.User{}).
-		Where("id = ?", id).
-		UpdateColumn("referral_reward", gorm.Expr("referral_reward + ?", amount)).
+	return r.db.Model(&domain.UserReferral{}).
+		Where("user_id = ?", id).
+		UpdateColumn("reward", gorm.Expr("reward + ?", amount)).
 		Error
 }
 

@@ -65,32 +65,22 @@ func (s *service) Login(_ context.Context, req dto.LoginRequest) (*dto.AuthRespo
 	if strings.EqualFold(u.Status, "suspended") {
 		return nil, domain.ErrInvalidCredentials
 	}
-	if u.ReferralCode == "" {
+	if u.Referral == nil || u.Referral.Code == "" {
 		code, err := s.generateReferralCode()
 		if err != nil {
 			return nil, err
 		}
-		u.ReferralCode = code
-		if err := s.users.Update(u); err != nil {
+		ref, err := s.users.EnsureReferralCode(u.ID, code)
+		if err != nil {
 			return nil, err
 		}
+		u.Referral = ref
 	}
 	token, err := s.jwt.Generate(u.ID, u.Email, u.Role)
 	if err != nil {
 		return nil, err
 	}
-	return &dto.AuthResponse{
-		Token: token,
-		User: dto.UserResponse{
-			ID:             u.ID,
-			Name:           u.Name,
-			Email:          u.Email,
-			Role:           u.Role,
-			Status:         u.Status,
-			ReferralCode:   u.ReferralCode,
-			ReferralReward: u.ReferralReward,
-		},
-	}, nil
+	return &dto.AuthResponse{Token: token, User: authUserResponse(u)}, nil
 }
 
 func (s *service) Register(_ context.Context, req dto.RegisterRequest) (*dto.AuthResponse, error) {
@@ -111,32 +101,25 @@ func (s *service) Register(_ context.Context, req dto.RegisterRequest) (*dto.Aut
 		return nil, err
 	}
 	u := domain.User{
-		Name:         name,
-		Email:        email,
-		Password:     string(hashed),
-		Role:         "user",
-		Status:       "active",
-		ReferralCode: ownReferralCode,
+		Name:     name,
+		Email:    email,
+		Password: string(hashed),
+		Role:     "user",
+		Status:   "active",
 	}
 	if err := s.users.Create(&u); err != nil {
 		return nil, err
 	}
+	ref, err := s.users.EnsureReferralCode(u.ID, ownReferralCode)
+	if err != nil {
+		return nil, err
+	}
+	u.Referral = ref
 	token, err := s.jwt.Generate(u.ID, u.Email, u.Role)
 	if err != nil {
 		return nil, err
 	}
-	return &dto.AuthResponse{
-		Token: token,
-		User: dto.UserResponse{
-			ID:             u.ID,
-			Name:           u.Name,
-			Email:          u.Email,
-			Role:           u.Role,
-			Status:         u.Status,
-			ReferralCode:   u.ReferralCode,
-			ReferralReward: u.ReferralReward,
-		},
-	}, nil
+	return &dto.AuthResponse{Token: token, User: authUserResponse(&u)}, nil
 }
 
 func (s *service) ChangePassword(_ context.Context, userID uuid.UUID, req dto.ChangePasswordRequest) error {
@@ -178,9 +161,7 @@ func (s *service) ForgotPassword(_ context.Context, req dto.ForgotPasswordReques
 		return err
 	}
 	expires := time.Now().UTC().Add(10 * time.Minute)
-	u.ResetOTP = string(hashedOTP)
-	u.ResetOTPExpiresAt = &expires
-	if err := s.users.Update(u); err != nil {
+	if err := s.users.UpsertResetOTP(u.ID, string(hashedOTP), expires); err != nil {
 		return err
 	}
 	if s.mailer != nil {
@@ -370,10 +351,10 @@ func (s *service) ResetPassword(_ context.Context, req dto.ResetPasswordRequest)
 		}
 		return err
 	}
-	if u.ResetOTP == "" || u.ResetOTPExpiresAt == nil || time.Now().UTC().After(*u.ResetOTPExpiresAt) {
+	if u.OTP == nil || u.OTP.CodeHash == "" || time.Now().UTC().After(u.OTP.ExpiresAt) {
 		return domain.ErrInvalidOTP
 	}
-	if err := bcrypt.CompareHashAndPassword([]byte(u.ResetOTP), []byte(strings.TrimSpace(req.OTP))); err != nil {
+	if err := bcrypt.CompareHashAndPassword([]byte(u.OTP.CodeHash), []byte(strings.TrimSpace(req.OTP))); err != nil {
 		return domain.ErrInvalidOTP
 	}
 	if strings.TrimSpace(req.NewPassword) == "" {
@@ -387,9 +368,10 @@ func (s *service) ResetPassword(_ context.Context, req dto.ResetPasswordRequest)
 		return err
 	}
 	u.Password = string(hashed)
-	u.ResetOTP = ""
-	u.ResetOTPExpiresAt = nil
-	return s.users.Update(u)
+	if err := s.users.Update(u); err != nil {
+		return err
+	}
+	return s.users.ClearResetOTP(u.ID)
 }
 
 func validateStrongPassword(password string) error {
@@ -449,11 +431,17 @@ func (s *service) GoogleLogin(ctx context.Context, req dto.GoogleLoginRequest) (
 		if cerr != nil {
 			return nil, cerr
 		}
-		newUser.ReferralCode = code
 		if err := s.users.Create(&newUser); err != nil {
 			return nil, err
 		}
+		ref, err := s.users.EnsureReferralCode(newUser.ID, code)
+		if err != nil {
+			return nil, err
+		}
+		newUser.Referral = ref
 		u = &newUser
+	} else if req.Mode == "register" {
+		return nil, domain.ErrAlreadyExists
 	} else if u.Photo == "" && claims.Picture != "" {
 		u.Photo = claims.Picture
 		if err := s.users.Update(u); err != nil {
@@ -463,34 +451,39 @@ func (s *service) GoogleLogin(ctx context.Context, req dto.GoogleLoginRequest) (
 	if strings.EqualFold(u.Status, "suspended") {
 		return nil, domain.ErrInvalidCredentials
 	}
-	if u.ReferralCode == "" {
+	if u.Referral == nil || u.Referral.Code == "" {
 		code, cerr := s.generateReferralCode()
 		if cerr != nil {
 			return nil, cerr
 		}
-		u.ReferralCode = code
-		if err := s.users.Update(u); err != nil {
+		ref, err := s.users.EnsureReferralCode(u.ID, code)
+		if err != nil {
 			return nil, err
 		}
+		u.Referral = ref
 	}
 	token, err := s.jwt.Generate(u.ID, u.Email, u.Role)
 	if err != nil {
 		return nil, err
 	}
-	return &dto.AuthResponse{
-		Token: token,
-		User: dto.UserResponse{
-			ID:             u.ID,
-			Name:           u.Name,
-			Email:          u.Email,
-			Role:           u.Role,
-			Photo:          u.Photo,
-			PhotoURL:       externalPhotoURL(u.Photo),
-			Status:         u.Status,
-			ReferralCode:   u.ReferralCode,
-			ReferralReward: u.ReferralReward,
-		},
-	}, nil
+	return &dto.AuthResponse{Token: token, User: authUserResponse(u)}, nil
+}
+
+func authUserResponse(u *domain.User) dto.UserResponse {
+	resp := dto.UserResponse{
+		ID:       u.ID,
+		Name:     u.Name,
+		Email:    u.Email,
+		Role:     u.Role,
+		Photo:    u.Photo,
+		PhotoURL: externalPhotoURL(u.Photo),
+		Status:   u.Status,
+	}
+	if u.Referral != nil {
+		resp.ReferralCode = u.Referral.Code
+		resp.ReferralReward = u.Referral.Reward
+	}
+	return resp
 }
 
 func externalPhotoURL(photo string) string {
@@ -568,17 +561,6 @@ func sanitizeName(value string) string {
 		lastSpace = false
 	}
 	return strings.TrimSpace(out.String())
-}
-
-func sanitizeReferralCode(value string) string {
-	value = strings.ToUpper(strings.TrimSpace(value))
-	var out strings.Builder
-	for _, r := range value {
-		if (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
-			out.WriteRune(r)
-		}
-	}
-	return out.String()
 }
 
 func (s *service) generateReferralCode() (string, error) {

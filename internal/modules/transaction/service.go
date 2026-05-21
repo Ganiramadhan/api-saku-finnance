@@ -2,6 +2,8 @@ package transaction
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ganiramadhan/starter-go/internal/domain"
@@ -129,13 +131,17 @@ func (s *service) Create(_ context.Context, userID uuid.UUID, req dto.CreateTran
 	if source == "" {
 		source = domain.TxnSourceManual
 	}
+	description := strings.TrimSpace(req.Description)
+	if source == domain.TxnSourceManual && description == "" {
+		return nil, fmt.Errorf("%w: deskripsi wajib diisi untuk transaksi manual", domain.ErrInvalidInput)
+	}
 	t := domain.Transaction{
 		ID:              uuid.New(),
 		WalletID:        req.WalletID,
 		CategoryID:      req.CategoryID,
 		Amount:          req.Amount,
 		Type:            req.Type,
-		Description:     req.Description,
+		Description:     description,
 		MerchantName:    req.MerchantName,
 		TransactionDate: req.TransactionDate,
 		Source:          source,

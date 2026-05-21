@@ -8,7 +8,7 @@ import (
 
 type CreateWalletRequest struct {
 	Name           string     `json:"name" validate:"required,min=2,max=120" example:"BCA Tabungan"`
-	Type           string     `json:"type" validate:"required,oneof=personal business shared" example:"personal"`
+	Type           string     `json:"type" validate:"required,oneof=e_wallet bank_account cash credit_card investment savings" example:"bank_account"`
 	Currency       string     `json:"currency" validate:"omitempty,len=3" example:"IDR"`
 	Balance        float64    `json:"balance" validate:"gte=0" example:"1500000"`
 	IsDefault      bool       `json:"is_default" example:"false"`
@@ -19,7 +19,7 @@ type CreateWalletRequest struct {
 
 type UpdateWalletRequest struct {
 	Name           string     `json:"name" validate:"omitempty,min=2,max=120"`
-	Type           string     `json:"type" validate:"omitempty,oneof=personal business shared"`
+	Type           string     `json:"type" validate:"omitempty,oneof=e_wallet bank_account cash credit_card investment savings"`
 	Currency       string     `json:"currency" validate:"omitempty,len=3"`
 	Balance        *float64   `json:"balance" validate:"omitempty,gte=0"`
 	IsDefault      *bool      `json:"is_default"`
@@ -212,6 +212,7 @@ type ScanReceiptResponse struct {
 	Currency     string         `json:"currency" example:"IDR"`
 	Date         string         `json:"date" example:"2026-05-12"`
 	Confidence   float64        `json:"confidence" example:"0.95"`
+	Description  string         `json:"description,omitempty" example:"Belanja Indomaret: roti, susu"`
 	NeedsReview  bool           `json:"needs_review" example:"false"`
 	OCRText      string         `json:"ocr_text,omitempty"`
 	LineItems    []string       `json:"line_items,omitempty"`
