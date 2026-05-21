@@ -7,12 +7,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"html"
 	"log"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/ganiramadhan/starter-go/internal/domain"
 	"github.com/ganiramadhan/starter-go/internal/dto"
@@ -51,7 +51,8 @@ func NewService(users user.Repository, j *jwt.Manager, googleClientID string, ma
 }
 
 func (s *service) Login(_ context.Context, req dto.LoginRequest) (*dto.AuthResponse, error) {
-	u, err := s.users.FindByEmail(req.Email)
+	email := sanitizeEmail(req.Email)
+	u, err := s.users.FindByEmail(email)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			return nil, domain.ErrInvalidCredentials
@@ -64,29 +65,58 @@ func (s *service) Login(_ context.Context, req dto.LoginRequest) (*dto.AuthRespo
 	if strings.EqualFold(u.Status, "suspended") {
 		return nil, domain.ErrInvalidCredentials
 	}
+	if u.ReferralCode == "" {
+		code, err := s.generateReferralCode()
+		if err != nil {
+			return nil, err
+		}
+		u.ReferralCode = code
+		if err := s.users.Update(u); err != nil {
+			return nil, err
+		}
+	}
 	token, err := s.jwt.Generate(u.ID, u.Email, u.Role)
 	if err != nil {
 		return nil, err
 	}
 	return &dto.AuthResponse{
 		Token: token,
-		User:  dto.UserResponse{ID: u.ID, Name: u.Name, Email: u.Email, Role: u.Role},
+		User: dto.UserResponse{
+			ID:             u.ID,
+			Name:           u.Name,
+			Email:          u.Email,
+			Role:           u.Role,
+			Status:         u.Status,
+			ReferralCode:   u.ReferralCode,
+			ReferralReward: u.ReferralReward,
+		},
 	}, nil
 }
 
 func (s *service) Register(_ context.Context, req dto.RegisterRequest) (*dto.AuthResponse, error) {
-	if existing, _ := s.users.FindByEmail(req.Email); existing != nil {
+	name := sanitizeName(req.Name)
+	email := sanitizeEmail(req.Email)
+	if name == "" || email == "" {
+		return nil, domain.ErrInvalidInput
+	}
+	if existing, _ := s.users.FindByEmail(email); existing != nil {
 		return nil, domain.ErrAlreadyExists
 	}
 	hashed, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
 		return nil, err
 	}
+	ownReferralCode, err := s.generateReferralCode()
+	if err != nil {
+		return nil, err
+	}
 	u := domain.User{
-		Name:     req.Name,
-		Email:    req.Email,
-		Password: string(hashed),
-		Role:     "user",
+		Name:         name,
+		Email:        email,
+		Password:     string(hashed),
+		Role:         "user",
+		Status:       "active",
+		ReferralCode: ownReferralCode,
 	}
 	if err := s.users.Create(&u); err != nil {
 		return nil, err
@@ -97,7 +127,15 @@ func (s *service) Register(_ context.Context, req dto.RegisterRequest) (*dto.Aut
 	}
 	return &dto.AuthResponse{
 		Token: token,
-		User:  dto.UserResponse{ID: u.ID, Name: u.Name, Email: u.Email, Role: u.Role},
+		User: dto.UserResponse{
+			ID:             u.ID,
+			Name:           u.Name,
+			Email:          u.Email,
+			Role:           u.Role,
+			Status:         u.Status,
+			ReferralCode:   u.ReferralCode,
+			ReferralReward: u.ReferralReward,
+		},
 	}, nil
 }
 
@@ -146,7 +184,7 @@ func (s *service) ForgotPassword(_ context.Context, req dto.ForgotPasswordReques
 		return err
 	}
 	if s.mailer != nil {
-		body := forgotPasswordEmailHTML(u.Name, otp)
+		body := forgotPasswordEmailHTML(u.Name, email, otp)
 		go func() {
 			if err := s.mailer.Send(email, "Kode OTP pemulihan password SAKU", body); err != nil {
 				log.Printf("auth: send forgot password otp email failed: %v", err)
@@ -155,83 +193,174 @@ func (s *service) ForgotPassword(_ context.Context, req dto.ForgotPasswordReques
 	}
 	return nil
 }
-func forgotPasswordEmailHTML(name, otp string) string {
+
+// TODO : implement rate limiting for forgot password to prevent abuse
+func forgotPasswordEmailHTML(name, email, otp string) string {
 	displayName := strings.TrimSpace(name)
 	if displayName == "" {
 		displayName = "Pengguna SAKU"
 	}
 
-	expiredAt := time.Now().Add(10 * time.Minute).Format("15:04 WIB")
+	accountEmail := strings.TrimSpace(email)
+	if accountEmail == "" {
+		accountEmail = "-"
+	}
+
+	cleanOTP := strings.TrimSpace(otp)
+	if cleanOTP == "" {
+		cleanOTP = "------"
+	}
 
 	return fmt.Sprintf(`<!doctype html>
 <html lang="id">
-<body style="margin:0;padding:0;background:#f3f6fb;font-family:Inter,Aptos,-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;color:#0f172a;">
-  <div style="max-width:640px;margin:0 auto;padding:48px 20px;">
-    <div style="background:#ffffff;border:1px solid #e5eaf1;border-radius:28px;overflow:hidden;box-shadow:0 24px 70px rgba(15,23,42,.08);">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Reset Password SAKU</title>
+  <style>
+    body, table, td, a {
+      -webkit-text-size-adjust:100%%;
+      -ms-text-size-adjust:100%%;
+    }
 
-      <div style="padding:34px 36px 28px;background:#ffffff;border-bottom:1px solid #eef2f7;">
-        <div style="display:inline-flex;align-items:center;gap:12px;">
-          <div style="width:46px;height:46px;border-radius:15px;background:#0f172a;color:#ffffff;text-align:center;line-height:46px;font-size:19px;font-weight:900;">
-            S
-          </div>
-          <div>
-            <div style="font-size:17px;font-weight:900;color:#0f172a;letter-spacing:-.02em;">SAKU</div>
-            <div style="font-size:12px;color:#64748b;margin-top:2px;">Account Security</div>
-          </div>
-        </div>
+    body {
+      margin:0;
+      padding:0;
+      width:100%% !important;
+      background:#ffffff;
+      font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Arial,sans-serif;
+    }
 
-        <h1 style="margin:30px 0 10px;font-size:28px;line-height:1.25;color:#0f172a;letter-spacing:-.04em;">
-          Verifikasi reset password
-        </h1>
+    table {
+      border-collapse:separate;
+      mso-table-lspace:0pt;
+      mso-table-rspace:0pt;
+    }
+  </style>
+</head>
 
-        <p style="margin:0;color:#475569;font-size:15px;line-height:1.75;">
-          Halo <strong style="color:#0f172a;">%s</strong>, gunakan kode OTP berikut untuk melanjutkan proses reset password akun SAKU Anda.
-        </p>
-      </div>
-
-      <div style="padding:36px;">
-        <div style="border:1px solid #dbe3ef;border-radius:24px;background:#f8fafc;padding:30px;text-align:center;">
-          <div style="font-size:12px;font-weight:800;color:#64748b;letter-spacing:.14em;text-transform:uppercase;">
-            Kode OTP Anda
-          </div>
-
-          <div style="margin:18px auto 0;display:inline-block;background:#ffffff;border:1px solid #e2e8f0;border-radius:18px;padding:18px 24px;">
-            <span style="font-size:40px;font-weight:900;letter-spacing:.22em;color:#0f172a;line-height:1;">
-              %s
-            </span>
-          </div>
-
-          <div style="margin:22px auto 0;max-width:340px;border-radius:16px;background:#eff6ff;border:1px solid #bfdbfe;padding:14px 16px;">
-            <div style="font-size:13px;color:#1e40af;line-height:1.6;">
-              Kode ini berlaku selama <strong>10 menit</strong><br>
-              Kedaluwarsa sekitar pukul <strong>%s</strong>
-            </div>
-          </div>
-        </div>
-
-        <div style="margin-top:24px;border:1px solid #fde68a;background:#fffbeb;border-radius:18px;padding:16px 18px;">
-          <p style="margin:0;color:#92400e;font-size:13px;line-height:1.7;">
-            Demi keamanan, jangan bagikan kode ini kepada siapa pun. SAKU tidak pernah meminta OTP melalui chat, telepon, atau email.
-          </p>
-        </div>
-
-        <p style="margin:24px 0 0;color:#64748b;font-size:13px;line-height:1.7;">
-          Jika Anda tidak meminta reset password, abaikan email ini. Password akun Anda tidak akan berubah.
-        </p>
-      </div>
-    </div>
-
-    <p style="margin:20px 0 0;text-align:center;color:#94a3b8;font-size:12px;line-height:1.6;">
-      Email ini dikirim otomatis oleh SAKU. Mohon tidak membalas email ini.
-    </p>
+<body style="margin:0;padding:0;background:#ffffff;">
+  <div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;color:#ffffff;line-height:1px;">
+    Kode OTP reset password SAKU berlaku selama 10 menit. Jangan bagikan kode ini kepada siapa pun.
   </div>
+
+  <table role="presentation" width="100%%" cellpadding="0" cellspacing="0" border="0" style="background:#ffffff;">
+    <tr>
+      <td align="center" style="padding:28px 16px;">
+
+        <table role="presentation" width="100%%" cellpadding="0" cellspacing="0" border="0" style="max-width:500px;background:#ffffff;border:1px solid #e5e7eb;border-radius:20px;overflow:hidden;box-shadow:0 6px 20px rgba(15,23,42,.05);">
+
+          <tr>
+            <td style="background:#1d4ed8;padding:20px 24px;">
+              <table role="presentation" width="100%%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td style="vertical-align:middle;">
+                    <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                      <tr>
+                        <td style="width:40px;height:40px;background:#ffffff;border-radius:10px;text-align:center;vertical-align:middle;">
+                          <span style="font-size:18px;font-weight:900;line-height:40px;color:#1d4ed8;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">S</span>
+                        </td>
+                        <td style="padding-left:12px;vertical-align:middle;">
+                          <div style="font-size:17px;font-weight:800;color:#ffffff;letter-spacing:.03em;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">SAKU</div>
+                          <div style="font-size:11px;color:#c7d2fe;letter-spacing:.08em;text-transform:uppercase;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">Account Security</div>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+
+                  <td align="right" style="vertical-align:middle;">
+                    <span style="display:inline-block;padding:8px 14px;border-radius:999px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.16);font-size:11px;font-weight:700;color:#ffffff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">
+                      Reset Password
+                    </span>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:28px;">
+              <h1 style="margin:0 0 12px;font-size:18px;font-weight:800;color:#0f172a;line-height:1.35;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">
+                Verifikasi identitas Anda
+              </h1>
+
+              <p style="margin:0 0 22px;font-size:14px;line-height:1.8;color:#475569;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">
+                Halo <strong style="color:#0f172a;">%s</strong>, kami menerima permintaan reset password. Gunakan kode berikut dan jangan bagikan kepada siapa pun.
+              </p>
+
+              <table role="presentation" width="100%%" cellpadding="0" cellspacing="0" border="0" style="background:#f8fbff;border:1px solid #dbeafe;border-radius:16px;margin-bottom:14px;">
+                <tr>
+                  <td align="center" style="padding:22px;">
+                    <div style="font-size:11px;font-weight:800;letter-spacing:.18em;color:#2563eb;margin-bottom:14px;text-transform:uppercase;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">
+                      Kode OTP
+                    </div>
+
+                    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 auto;">
+                      <tr>
+                        <td style="padding:14px 28px;background:#ffffff;border:1px solid #dbeafe;border-radius:12px;text-align:center;">
+                          <span style="font-size:32px;font-weight:900;letter-spacing:.24em;color:#1e3a5f;font-family:'Courier New',Courier,monospace;line-height:1;">
+                            %s
+                          </span>
+                        </td>
+                      </tr>
+                    </table>
+
+                    <div style="margin-top:14px;font-size:13px;font-weight:700;color:#2563eb;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">
+                      Berlaku selama 10 menit
+                    </div>
+                  </td>
+                </tr>
+              </table>
+
+              <table role="presentation" width="100%%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:14px;">
+                <tr>
+                  <td width="100%%" style="vertical-align:top;">
+                    <table role="presentation" width="100%%" cellpadding="0" cellspacing="0" border="0" style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;">
+                      <tr>
+                        <td style="padding:14px;">
+                          <div style="font-size:10px;font-weight:800;color:#15803d;margin-bottom:4px;letter-spacing:.08em;text-transform:uppercase;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">Email Anda</div>
+                          <div style="font-size:13px;font-weight:700;color:#166534;word-break:break-word;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">%s</div>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <table role="presentation" width="100%%" cellpadding="0" cellspacing="0" border="0" style="background:#fff7ed;border-left:3px solid #f97316;border-radius:10px;margin-bottom:18px;">
+                <tr>
+                  <td style="padding:14px;">
+                    <p style="margin:0;font-size:13px;line-height:1.7;color:#9a3412;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">
+                      <strong>Bukan Anda?</strong> Abaikan email ini dan akun tetap aman.
+                    </p>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="margin:0;font-size:12px;line-height:1.7;color:#94a3b8;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">
+                SAKU tidak pernah meminta OTP melalui chat, telepon, atau email.
+              </p>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:16px;border-top:1px solid #eef2f7;text-align:center;background:#ffffff;">
+              <p style="margin:0;font-size:11px;color:#64748b;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">
+                &copy; 2026 SAKU &middot; Email otomatis, mohon tidak dibalas
+              </p>
+            </td>
+          </tr>
+
+        </table>
+
+      </td>
+    </tr>
+  </table>
 </body>
-</html>`,
-		html.EscapeString(displayName),
-		html.EscapeString(otp),
-		expiredAt,
-	)
+</html>`, displayName, cleanOTP, accountEmail)
 }
+
 func (s *service) ResetPassword(_ context.Context, req dto.ResetPasswordRequest) error {
 	email := strings.ToLower(strings.TrimSpace(req.Email))
 	u, err := s.users.FindByEmail(email)
@@ -300,9 +429,6 @@ func (s *service) GoogleLogin(ctx context.Context, req dto.GoogleLoginRequest) (
 		return nil, err
 	}
 	if u == nil {
-		if strings.ToLower(strings.TrimSpace(req.Mode)) != "register" {
-			return nil, domain.ErrEmailNotRegistered
-		}
 		randomBytes := make([]byte, 24)
 		if _, rerr := rand.Read(randomBytes); rerr != nil {
 			return nil, rerr
@@ -312,13 +438,18 @@ func (s *service) GoogleLogin(ctx context.Context, req dto.GoogleLoginRequest) (
 			return nil, herr
 		}
 		newUser := domain.User{
-			Name:     coalesce(claims.Name, claims.GivenName, email),
+			Name:     sanitizeName(coalesce(claims.Name, claims.GivenName, email)),
 			Email:    email,
 			Password: string(hashed),
 			Photo:    claims.Picture,
 			Role:     "user",
 			Status:   "active",
 		}
+		code, cerr := s.generateReferralCode()
+		if cerr != nil {
+			return nil, cerr
+		}
+		newUser.ReferralCode = code
 		if err := s.users.Create(&newUser); err != nil {
 			return nil, err
 		}
@@ -332,6 +463,16 @@ func (s *service) GoogleLogin(ctx context.Context, req dto.GoogleLoginRequest) (
 	if strings.EqualFold(u.Status, "suspended") {
 		return nil, domain.ErrInvalidCredentials
 	}
+	if u.ReferralCode == "" {
+		code, cerr := s.generateReferralCode()
+		if cerr != nil {
+			return nil, cerr
+		}
+		u.ReferralCode = code
+		if err := s.users.Update(u); err != nil {
+			return nil, err
+		}
+	}
 	token, err := s.jwt.Generate(u.ID, u.Email, u.Role)
 	if err != nil {
 		return nil, err
@@ -339,12 +480,15 @@ func (s *service) GoogleLogin(ctx context.Context, req dto.GoogleLoginRequest) (
 	return &dto.AuthResponse{
 		Token: token,
 		User: dto.UserResponse{
-			ID:       u.ID,
-			Name:     u.Name,
-			Email:    u.Email,
-			Role:     u.Role,
-			Photo:    u.Photo,
-			PhotoURL: externalPhotoURL(u.Photo),
+			ID:             u.ID,
+			Name:           u.Name,
+			Email:          u.Email,
+			Role:           u.Role,
+			Photo:          u.Photo,
+			PhotoURL:       externalPhotoURL(u.Photo),
+			Status:         u.Status,
+			ReferralCode:   u.ReferralCode,
+			ReferralReward: u.ReferralReward,
 		},
 	}, nil
 }
@@ -399,4 +543,54 @@ func coalesce(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func sanitizeEmail(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
+}
+
+func sanitizeName(value string) string {
+	value = strings.TrimSpace(value)
+	var out strings.Builder
+	lastSpace := false
+	for _, r := range value {
+		if unicode.IsControl(r) || r == '<' || r == '>' {
+			continue
+		}
+		if unicode.IsSpace(r) {
+			if !lastSpace {
+				out.WriteRune(' ')
+				lastSpace = true
+			}
+			continue
+		}
+		out.WriteRune(r)
+		lastSpace = false
+	}
+	return strings.TrimSpace(out.String())
+}
+
+func sanitizeReferralCode(value string) string {
+	value = strings.ToUpper(strings.TrimSpace(value))
+	var out strings.Builder
+	for _, r := range value {
+		if (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			out.WriteRune(r)
+		}
+	}
+	return out.String()
+}
+
+func (s *service) generateReferralCode() (string, error) {
+	for i := 0; i < 8; i++ {
+		randomBytes := make([]byte, 4)
+		if _, err := rand.Read(randomBytes); err != nil {
+			return "", err
+		}
+		code := "SAKU" + strings.ToUpper(hex.EncodeToString(randomBytes))
+		if existing, _ := s.users.FindByReferralCode(code); existing == nil {
+			return code, nil
+		}
+	}
+	return "", fmt.Errorf("failed to generate referral code")
 }

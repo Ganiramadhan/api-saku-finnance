@@ -3,7 +3,9 @@ package subscription
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -12,6 +14,8 @@ import (
 	"github.com/ganiramadhan/starter-go/internal/modules/user"
 	"github.com/google/uuid"
 )
+
+const referralPaymentReward int64 = 5000
 
 type Service interface {
 	// Public
@@ -22,6 +26,7 @@ type Service interface {
 	ActiveSubscription(ctx context.Context, userID uuid.UUID) (*dto.SubscriptionResponse, error)
 	ConfirmCheckout(ctx context.Context, userID uuid.UUID, req dto.ConfirmSubscriptionRequest) (*dto.SubscriptionResponse, error)
 	Cancel(ctx context.Context, userID, id uuid.UUID) error
+	HasActiveProSubscription(ctx context.Context, userID uuid.UUID) (bool, error)
 	// Admin
 	ListAllAdmin(ctx context.Context, limit, offset int) ([]dto.AdminSubscriptionResponse, error)
 	// Webhook
@@ -77,6 +82,7 @@ func toSubResp(s domain.Subscription) dto.SubscriptionResponse {
 		EndsAt:        s.EndsAt,
 		PaidAt:        s.PaidAt,
 		NextBillingAt: s.NextBillingAt,
+		ReferralCode:  s.ReferralCode,
 		CreatedAt:     s.CreatedAt,
 		UpdatedAt:     s.UpdatedAt,
 	}
@@ -111,6 +117,21 @@ func (s *service) Checkout(ctx context.Context, userID uuid.UUID, req dto.Checko
 	if err != nil {
 		return nil, err
 	}
+	referralCode := sanitizeReferralCode(req.ReferralCode)
+	var referrer *domain.User
+	if referralCode != "" {
+		found, err := s.users.FindByReferralCode(referralCode)
+		if err != nil {
+			if errors.Is(err, domain.ErrNotFound) {
+				return nil, domain.ErrInvalidReferral
+			}
+			return nil, err
+		}
+		if found.ID == userID {
+			return nil, domain.ErrInvalidReferral
+		}
+		referrer = found
+	}
 
 	orderID := fmt.Sprintf("SAKU-%s-%d", strings.ToUpper(plan.Code), time.Now().UnixMilli())
 
@@ -124,6 +145,10 @@ func (s *service) Checkout(ctx context.Context, userID uuid.UUID, req dto.Checko
 		Amount:          plan.Price, // record the *full* recurring amount
 		Currency:        plan.Currency,
 		MidtransOrderID: orderID,
+		ReferralCode:    referralCode,
+	}
+	if referrer != nil {
+		sub.ReferrerID = &referrer.ID
 	}
 	if err := s.repo.CreateSubscription(sub); err != nil {
 		return nil, err
@@ -202,6 +227,9 @@ func (s *service) ListAllAdmin(_ context.Context, limit, offset int) ([]dto.Admi
 		if r.User != nil {
 			entry.UserName = r.User.Name
 			entry.UserEmail = r.User.Email
+			if strings.HasPrefix(r.User.Photo, "http://") || strings.HasPrefix(r.User.Photo, "https://") {
+				entry.UserPhoto = r.User.Photo
+			}
 		}
 		out = append(out, entry)
 	}
@@ -296,6 +324,7 @@ func (s *service) HandleWebhook(_ context.Context, p dto.MidtransWebhook) error 
 }
 
 func (s *service) activate(sub *domain.Subscription) {
+	wasActive := sub.Status == domain.SubscriptionStatusActive
 	now := time.Now().UTC()
 	sub.Status = domain.SubscriptionStatusActive
 	sub.PaidAt = &now
@@ -321,4 +350,36 @@ func (s *service) activate(sub *domain.Subscription) {
 	}
 	sub.EndsAt = &end
 	sub.NextBillingAt = &end
+	if !wasActive && !sub.ReferralRewardPaid && sub.ReferrerID != nil {
+		if err := s.users.AddReferralReward(*sub.ReferrerID, referralPaymentReward); err != nil {
+			log.Printf("subscription: add referral reward failed: %v", err)
+		} else {
+			sub.ReferralRewardPaid = true
+		}
+	}
+}
+
+func sanitizeReferralCode(value string) string {
+	value = strings.ToUpper(strings.TrimSpace(value))
+	var out strings.Builder
+	for _, r := range value {
+		if (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			out.WriteRune(r)
+		}
+	}
+	return out.String()
+}
+
+func (s *service) HasActiveProSubscription(_ context.Context, userID uuid.UUID) (bool, error) {
+	sub, err := s.repo.FindActiveByUserID(userID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	if sub == nil {
+		return false, nil
+	}
+	return sub.Status == domain.SubscriptionStatusActive, nil
 }

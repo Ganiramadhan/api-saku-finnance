@@ -181,6 +181,7 @@ type CategorizeResponse struct {
 	Category     string           `json:"category" example:"Food & Beverage"`
 	Type         string           `json:"type" example:"expense"`
 	Confidence   float64          `json:"confidence" example:"0.95"`
+	Date         string           `json:"date,omitempty" example:"2026-05-20"`
 	NeedsReview  bool             `json:"needs_review" example:"false"`
 	RawResponse  map[string]any   `json:"raw_response,omitempty" swaggertype:"object"`
 	Transactions []CategorizeItem `json:"transactions,omitempty"`
@@ -193,6 +194,7 @@ type CategorizeItem struct {
 	Type         string  `json:"type" example:"expense"`
 	Confidence   float64 `json:"confidence" example:"0.9"`
 	Description  string  `json:"description,omitempty" example:"bubur ayam"`
+	Date         string  `json:"date,omitempty" example:"2026-05-20"`
 }
 
 // ScanReceiptRequest accepts a base64-encoded receipt image (JPEG/PNG/WebP).
@@ -212,6 +214,7 @@ type ScanReceiptResponse struct {
 	Confidence   float64        `json:"confidence" example:"0.95"`
 	NeedsReview  bool           `json:"needs_review" example:"false"`
 	OCRText      string         `json:"ocr_text,omitempty"`
+	LineItems    []string       `json:"line_items,omitempty"`
 	RawResponse  map[string]any `json:"raw_response,omitempty" swaggertype:"object"`
 }
 

@@ -42,7 +42,7 @@ func Register(app *fiber.App, h Handlers, jwtMgr *jwt.Manager) {
 
 	// ---------------- Public ----------------
 	authPub := v1.Group("/auth")
-	authPub.Post("/login", h.Auth.Login)
+	authPub.Post("/login", middleware.LoginRateLimiter(), h.Auth.Login)
 	authPub.Post("/register", h.Auth.Register)
 	authPub.Post("/google", h.Auth.GoogleLogin)
 	authPub.Post("/forgot-password", h.Auth.ForgotPassword)

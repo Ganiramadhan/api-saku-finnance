@@ -113,6 +113,8 @@ func ensureEnums(db *gorm.DB) error {
 var indexStatements = []string{
 	`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email
 		ON users (email) WHERE deleted_at IS NULL`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_referral_code
+		ON users (referral_code) WHERE deleted_at IS NULL AND referral_code <> ''`,
 	`CREATE INDEX IF NOT EXISTS idx_users_status ON users (status)`,
 
 	`CREATE UNIQUE INDEX IF NOT EXISTS idx_wallets_user_default
@@ -140,6 +142,8 @@ var indexStatements = []string{
 		ON budgets (wallet_id, category_id) WHERE deleted_at IS NULL`,
 	`CREATE INDEX IF NOT EXISTS idx_notifications_user_created
 		ON notifications (user_id, created_at DESC)`,
+	`CREATE INDEX IF NOT EXISTS idx_subscriptions_referrer
+		ON subscriptions (referrer_id) WHERE referrer_id IS NOT NULL`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_user_ref_type
 		ON notifications (user_id, ref_type, ref_id, type)
 		WHERE ref_type <> '' AND ref_id <> ''`,

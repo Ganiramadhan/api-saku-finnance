@@ -53,6 +53,16 @@ func (r *fakeRepo) FindByEmail(email string) (*domain.User, error) {
 	return nil, domain.ErrNotFound
 }
 
+func (r *fakeRepo) FindByReferralCode(code string) (*domain.User, error) {
+	for _, u := range r.users {
+		if u.ReferralCode == strings.ToUpper(strings.TrimSpace(code)) {
+			copy := *u
+			return &copy, nil
+		}
+	}
+	return nil, domain.ErrNotFound
+}
+
 func (r *fakeRepo) Create(u *domain.User) error {
 	if r.createErr != nil {
 		return r.createErr
@@ -71,6 +81,15 @@ func (r *fakeRepo) Update(u *domain.User) error {
 	}
 	copy := *u
 	r.users[u.ID] = &copy
+	return nil
+}
+
+func (r *fakeRepo) AddReferralReward(id uuid.UUID, amount int64) error {
+	u, ok := r.users[id]
+	if !ok {
+		return domain.ErrNotFound
+	}
+	u.ReferralReward += amount
 	return nil
 }
 

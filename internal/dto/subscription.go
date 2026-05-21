@@ -1,6 +1,7 @@
 package dto
 
 import (
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -18,7 +19,13 @@ type PlanResponse struct {
 }
 
 type CheckoutRequest struct {
-	PlanCode string `json:"plan_code" validate:"required,min=2,max=32" example:"pro"`
+	PlanCode     string `json:"plan_code" validate:"required,min=2,max=32" example:"pro"`
+	ReferralCode string `json:"referral_code,omitempty" validate:"omitempty,max=32" example:"SAKU1A2B3C4D"`
+}
+
+func (r *CheckoutRequest) Sanitize() {
+	r.PlanCode = strings.ToLower(strings.TrimSpace(r.PlanCode))
+	r.ReferralCode = sanitizeReferralInput(r.ReferralCode)
 }
 
 type CheckoutResponse struct {
@@ -48,6 +55,7 @@ type SubscriptionResponse struct {
 	EndsAt        *time.Time `json:"ends_at,omitempty"`
 	PaidAt        *time.Time `json:"paid_at,omitempty"`
 	NextBillingAt *time.Time `json:"next_billing_at,omitempty"`
+	ReferralCode  string     `json:"referral_code,omitempty"`
 	CreatedAt     time.Time  `json:"created_at"`
 	UpdatedAt     time.Time  `json:"updated_at"`
 }
@@ -57,6 +65,7 @@ type AdminSubscriptionResponse struct {
 	UserID    uuid.UUID `json:"user_id"`
 	UserName  string    `json:"user_name"`
 	UserEmail string    `json:"user_email"`
+	UserPhoto string    `json:"user_photo_url,omitempty"`
 }
 
 type MidtransWebhook struct {

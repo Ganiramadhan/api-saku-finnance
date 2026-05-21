@@ -232,7 +232,7 @@ func (a *App) initHTTP() {
 		Budget:       budget.NewHandler(budgetSvc, a.validator),
 		SavingsGoal:  savingsgoal.NewHandler(goalSvc, a.validator),
 		Subscription: subscription.NewHandler(subSvc, a.validator),
-		SplitBill:    splitbill.NewHandler(splitSvc, a.validator),
+		SplitBill:    splitbill.NewHandler(splitSvc, a.validator, subSvc),
 		Billing:      upcomingbilling.NewHandler(billingSvc, a.validator),
 		AI:           aimodule.NewHandler(aiSvc, a.validator),
 		Notification: notification.NewHandler(notificationSvc, a.validator),

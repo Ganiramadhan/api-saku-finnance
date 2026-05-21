@@ -16,6 +16,8 @@ type User struct {
 	Phone             string    `gorm:"type:varchar(32)"`
 	Role              string    `gorm:"type:varchar(50);not null;default:'user'"`
 	Status            string    `gorm:"type:varchar(20);not null;default:'active'"`
+	ReferralCode      string    `gorm:"type:varchar(32);not null;default:''"`
+	ReferralReward    int64     `gorm:"not null;default:0"`
 	ResetOTP          string    `gorm:"type:varchar(255)"`
 	ResetOTPExpiresAt *time.Time
 	CreatedAt         time.Time

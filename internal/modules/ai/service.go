@@ -93,7 +93,18 @@ OUTPUT RULES:
 
 func (s *service) Categorize(ctx context.Context, userID uuid.UUID, req dto.CategorizeRequest) (dto.CategorizeResponse, error) {
 	cats := s.resolveCategories(userID, req.UserCategories)
+	now := time.Now()
+	today := now.Format("2006-01-02")
+	yesterday := now.AddDate(0, 0, -1).Format("2006-01-02")
+	tomorrow := now.AddDate(0, 0, 1).Format("2006-01-02")
+
 	prompt := fmt.Sprintf(`You will receive a free-form Indonesian/English text describing one OR MORE personal finance transactions.
+
+TODAY'S DATE is %s. Interpret relative Indonesian/English dates against this date:
+- "hari ini" / "today" = %s
+- "kemarin" / "yesterday" = %s
+- "besok" / "tomorrow" = %s
+- If no date is mentioned, use %s.
 
 ALLOWED CATEGORIES (you MUST pick the BEST match from this exact list, case-insensitive):
 %s
@@ -124,6 +135,7 @@ GENERAL RULES:
    - type: "expense" unless the text clearly says income/gaji/bonus/refund/masuk
    - confidence: 0..1, how sure you are
    - description: a SHORT (max 6 words) summary of THIS transaction only
+   - date: transaction date as YYYY-MM-DD, using the relative date rules above
 4. NEVER merge multiple distinct purchases into one transaction.
 5. NEVER invent transactions that are not in the text.
 
@@ -135,10 +147,10 @@ Text:
 Return ONLY this JSON shape (no markdown, no commentary):
 {
   "transactions": [
-    {"amount": number, "merchant_name": string, "category": string, "type": "income"|"expense", "confidence": 0..1, "description": string}
+    {"amount": number, "merchant_name": string, "category": string, "type": "income"|"expense", "confidence": 0..1, "description": string, "date": "YYYY-MM-DD"}
   ]
 }`,
-		strings.Join(cats, ", "), req.Text)
+		today, today, yesterday, tomorrow, today, strings.Join(cats, ", "), req.Text)
 
 	start := time.Now()
 	raw, err := s.claude.AskWithSystem(ctx, systemPrompt, prompt)
@@ -168,12 +180,14 @@ Return ONLY this JSON shape (no markdown, no commentary):
 		out.Category = first.Category
 		out.Type = first.Type
 		out.Confidence = first.Confidence
+		out.Date = first.Date
 	} else {
 		out.Amount = getNumber(parsed, "amount")
 		out.MerchantName = getString(parsed, "merchant_name")
 		out.Category = firstString(parsed, "category", "kategori")
 		out.Type = normalizeType(getString(parsed, "type"))
 		out.Confidence = getNumber(parsed, "confidence")
+		out.Date = firstString(parsed, "date", "transaction_date")
 		if out.Amount > 0 || out.MerchantName != "" || out.Category != "" {
 			out.Transactions = []dto.CategorizeItem{{
 				Amount:       out.Amount,
@@ -182,6 +196,7 @@ Return ONLY this JSON shape (no markdown, no commentary):
 				Type:         out.Type,
 				Confidence:   out.Confidence,
 				Description:  req.Text,
+				Date:         out.Date,
 			}}
 		}
 	}
@@ -217,6 +232,7 @@ func extractCategorizeItems(parsed map[string]any) []dto.CategorizeItem {
 			Type:         normalizeType(getString(obj, "type")),
 			Confidence:   getNumber(obj, "confidence"),
 			Description:  getString(obj, "description"),
+			Date:         firstString(obj, "date", "transaction_date"),
 		}
 		if item.Amount <= 0 && item.MerchantName == "" && item.Category == "" {
 			continue
@@ -289,7 +305,7 @@ CRITICAL RULES — read carefully BEFORE deciding the type and category:
    so the UI can ask the user to review.
 
 Return ONLY this JSON (no commentary, no markdown fences):
-{"amount": number, "merchant_name": string, "category": string, "type": "income"|"expense", "currency": string, "date": "YYYY-MM-DD", "confidence": 0..1, "ocr_text": string}`,
+{"amount": number, "merchant_name": string, "category": string, "type": "income"|"expense", "currency": string, "date": "YYYY-MM-DD", "confidence": 0..1, "line_items": ["item name"], "ocr_text": string}`,
 		strings.Join(cats, ", "))
 
 	start := time.Now()
@@ -311,6 +327,7 @@ Return ONLY this JSON (no commentary, no markdown fences):
 		Date:         getString(parsed, "date"),
 		Confidence:   getNumber(parsed, "confidence"),
 		OCRText:      getString(parsed, "ocr_text"),
+		LineItems:    getStringSlice(parsed, "line_items"),
 		RawResponse:  parsed,
 	}
 	out.NeedsReview = needsReview(out.Confidence, parsed == nil)

@@ -12,8 +12,10 @@ type Repository interface {
 	FindAll(page, limit int, search string) ([]domain.User, int64, error)
 	FindByID(id uuid.UUID) (*domain.User, error)
 	FindByEmail(email string) (*domain.User, error)
+	FindByReferralCode(code string) (*domain.User, error)
 	Create(u *domain.User) error
 	Update(u *domain.User) error
+	AddReferralReward(id uuid.UUID, amount int64) error
 	Delete(id uuid.UUID) error
 }
 
@@ -63,9 +65,27 @@ func (r *repository) FindByEmail(email string) (*domain.User, error) {
 	return &u, nil
 }
 
+func (r *repository) FindByReferralCode(code string) (*domain.User, error) {
+	var u domain.User
+	if err := r.db.Where("referral_code = ?", strings.ToUpper(strings.TrimSpace(code))).First(&u).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, domain.ErrNotFound
+		}
+		return nil, err
+	}
+	return &u, nil
+}
+
 func (r *repository) Create(u *domain.User) error { return r.db.Create(u).Error }
 
 func (r *repository) Update(u *domain.User) error { return r.db.Save(u).Error }
+
+func (r *repository) AddReferralReward(id uuid.UUID, amount int64) error {
+	return r.db.Model(&domain.User{}).
+		Where("id = ?", id).
+		UpdateColumn("referral_reward", gorm.Expr("referral_reward + ?", amount)).
+		Error
+}
 
 func (r *repository) Delete(id uuid.UUID) error {
 	return r.db.Where("id = ?", id).Delete(&domain.User{}).Error
