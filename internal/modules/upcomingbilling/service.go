@@ -2,11 +2,18 @@ package upcomingbilling
 
 import (
 	"context"
+	"strings"
 
 	"github.com/ganiramadhan/starter-go/internal/domain"
 	"github.com/ganiramadhan/starter-go/internal/dto"
+	"github.com/ganiramadhan/starter-go/internal/modules/subscription"
+	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 )
+
+const freeBillingLimit = 3
+const proBillingLimit = 20
+const premiumBillingLimit = 100
 
 type Service interface {
 	List(ctx context.Context, userID uuid.UUID) ([]dto.UpcomingBillingResponse, error)
@@ -15,9 +22,18 @@ type Service interface {
 	Delete(ctx context.Context, userID, id uuid.UUID) error
 }
 
-type service struct{ repo Repository }
+type service struct {
+	repo          Repository
+	subscriptions subscription.Service
+}
 
-func NewService(repo Repository) Service { return &service{repo: repo} }
+func NewService(repo Repository, subs ...subscription.Service) Service {
+	var subSvc subscription.Service
+	if len(subs) > 0 {
+		subSvc = subs[0]
+	}
+	return &service{repo: repo, subscriptions: subSvc}
+}
 
 func toResp(b domain.UpcomingBilling) dto.UpcomingBillingResponse {
 	return dto.UpcomingBillingResponse{
@@ -48,7 +64,10 @@ func (s *service) List(_ context.Context, userID uuid.UUID) ([]dto.UpcomingBilli
 	return out, nil
 }
 
-func (s *service) Create(_ context.Context, userID uuid.UUID, req dto.UpcomingBillingRequest) (*dto.UpcomingBillingResponse, error) {
+func (s *service) Create(ctx context.Context, userID uuid.UUID, req dto.UpcomingBillingRequest) (*dto.UpcomingBillingResponse, error) {
+	if err := s.enforceBillingLimit(ctx, userID); err != nil {
+		return nil, err
+	}
 	currency := req.Currency
 	if currency == "" {
 		currency = "IDR"
@@ -73,6 +92,33 @@ func (s *service) Create(_ context.Context, userID uuid.UUID, req dto.UpcomingBi
 	}
 	resp := toResp(row)
 	return &resp, nil
+}
+
+func (s *service) enforceBillingLimit(ctx context.Context, userID uuid.UUID) error {
+	limit := freeBillingLimit
+	message := "Free plan can create up to 3 upcoming billings. Upgrade to Pro for more billing reminders"
+	if s.subscriptions != nil {
+		planCode, active, err := s.subscriptions.ActivePlanCode(ctx, userID)
+		if err != nil {
+			return err
+		}
+		if active {
+			limit = proBillingLimit
+			message = "Pro plan can create up to 20 upcoming billings. Upgrade to Premium for more billing reminders"
+			if strings.Contains(planCode, "premium") {
+				limit = premiumBillingLimit
+				message = "Premium plan can create up to 100 upcoming billings"
+			}
+		}
+	}
+	rows, err := s.repo.List(userID)
+	if err != nil {
+		return err
+	}
+	if len(rows) >= limit {
+		return fiber.NewError(fiber.StatusForbidden, message)
+	}
+	return nil
 }
 
 func (s *service) Update(_ context.Context, userID, id uuid.UUID, req dto.UpdateUpcomingBillingRequest) (*dto.UpcomingBillingResponse, error) {

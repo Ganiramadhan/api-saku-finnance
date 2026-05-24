@@ -1,137 +1,62 @@
-name: starter-go
-
 services:
-  postgres:
-    image: postgres:16-alpine
-    container_name: starter-postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: saku
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d saku"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-    networks: [backend]
-
-  redis:
-    image: redis:7-alpine
-    container_name: starter-redis
-    restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes"]
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-    networks: [backend]
-
-  minio:
-    image: minio/minio:latest
-    container_name: starter-minio
-    restart: unless-stopped
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
-    ports:
-      - "9000:9000"   # S3 API
-      - "9001:9001"   # Web console
-    volumes:
-      - minio_data:/data
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-    networks: [backend]
-
-  minio-init:
-    image: minio/mc:latest
-    container_name: starter-minio-init
-    depends_on:
-      minio:
-        condition: service_healthy
-    environment:
-      AWS_ACCESS_KEY_ID: minioadmin
-      AWS_SECRET_ACCESS_KEY: minioadmin
-      AWS_BUCKET: saku
-    entrypoint: >
-      /bin/sh -c '
-      mc alias set local http://minio:9000 "$$AWS_ACCESS_KEY_ID" "$$AWS_SECRET_ACCESS_KEY" &&
-      mc mb --ignore-existing local/"$$AWS_BUCKET" &&
-      echo "minio: bucket $$AWS_BUCKET ready"
-      '
-    networks: [backend]
-    restart: "no"
-
   api:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile
-      args:
-        VERSION: ${VERSION:-dev}
-    image: starter-go:${VERSION:-dev}
-    container_name: starter-api
-    restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      minio:
-        condition: service_healthy
-    environment:
-      APP_PORT: 4000
-      APP_ENV: development
-      CORS_ORIGINS: http://localhost:3000,http://localhost:5173,http://127.0.0.1:5173
-      DB_HOST: postgres
-      DB_PORT: 5432
-      DB_USER: postgres
-      DB_PASSWORD: postgres
-      DB_NAME: saku
-      DB_SSLMODE: disable
-      DB_MAX_OPEN_CONNS: 25
-      DB_MAX_IDLE_CONNS: 5
-      DB_CONN_MAX_LIFETIME: 5
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      REDIS_PASSWORD: ""
-      REDIS_DB: 0
-      REDIS_POOL_SIZE: 10
-      JWT_SECRET: secret
-      JWT_TTL_HOURS: 24
-      AWS_ACCESS_KEY_ID: minioadmin
-      AWS_SECRET_ACCESS_KEY: minioadmin
-      AWS_DEFAULT_REGION: us-east-1
-      AWS_BUCKET: saku
-      AWS_ENDPOINT: http://minio:9000
-      AWS_USE_PATH_STYLE_ENDPOINT: "true"
-      CLAUDE_API_KEY: ""
-      CLAUDE_MODEL: claude-sonnet-4-5
-      MIDTRANS_SERVER_KEY: SB-Mid-server-TYtZRGMWCxUBmrSskjtT27BF
-      MIDTRANS_CLIENT_KEY: SB-Mid-client-yptkciOJel1brnqp
-      MIDTRANS_IS_PROD: "false"
-      GOOGLE_CLIENT_ID: 856728426002-sctrs5po9q5rlt2gf3fbjn7ufqcbcna6.apps.googleusercontent.com
+    image: ${IMAGE_NAME}:${IMAGE_TAG}
+    container_name: ${APP_NAME}
+    restart: ${RESTART_POLICY}
     ports:
-      - "4000:4000"
-    networks: [backend]
+      - "${APP_PORT}:${APP_PORT}"
+    environment:
+      - APP_PORT=${APP_PORT}
+      - APP_ENV=${APP_ENV}
+      - CORS_ORIGINS=${CORS_ORIGINS}
 
-volumes:
-  postgres_data:
-  redis_data:
-  minio_data:
+      - DB_HOST=${DB_HOST}
+      - DB_PORT=${DB_PORT}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=${DB_NAME}
+      - DB_SSLMODE=${DB_SSLMODE}
+      - DB_MAX_OPEN_CONNS=${DB_MAX_OPEN_CONNS}
+      - DB_MAX_IDLE_CONNS=${DB_MAX_IDLE_CONNS}
+      - DB_CONN_MAX_LIFETIME=${DB_CONN_MAX_LIFETIME}
+
+      - REDIS_HOST=${REDIS_HOST}
+      - REDIS_PORT=${REDIS_PORT}
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - REDIS_DB=${REDIS_DB}
+      - REDIS_POOL_SIZE=${REDIS_POOL_SIZE}
+
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_TTL_HOURS=${JWT_TTL_HOURS}
+
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}
+      - AWS_BUCKET=${AWS_BUCKET}
+      - AWS_ENDPOINT=${AWS_ENDPOINT}
+      - AWS_USE_PATH_STYLE_ENDPOINT=${AWS_USE_PATH_STYLE_ENDPOINT}
+
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY}
+      - CLAUDE_MODEL=${CLAUDE_MODEL}
+
+      - MIDTRANS_SERVER_KEY=${MIDTRANS_SERVER_KEY}
+      - MIDTRANS_CLIENT_KEY=${MIDTRANS_CLIENT_KEY}
+      - MIDTRANS_IS_PROD=${MIDTRANS_IS_PROD}
+
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+
+      - MAIL_MAILER=${MAIL_MAILER}
+      - MAIL_HOST=${MAIL_HOST}
+      - MAIL_PORT=${MAIL_PORT}
+      - MAIL_USERNAME=${MAIL_USERNAME}
+      - MAIL_PASSWORD=${MAIL_PASSWORD}
+      - MAIL_ENCRYPTION=${MAIL_ENCRYPTION}
+      - MAIL_FROM_ADDRESS=${MAIL_FROM_ADDRESS}
+      - MAIL_FROM_NAME=${MAIL_FROM_NAME}
+    networks:
+      - backend
 
 networks:
   backend:
+    name: ${DOCKER_NETWORK}
     driver: bridge

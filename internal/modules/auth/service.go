@@ -167,7 +167,7 @@ func (s *service) ForgotPassword(_ context.Context, req dto.ForgotPasswordReques
 	if s.mailer != nil {
 		body := forgotPasswordEmailHTML(u.Name, email, otp)
 		go func() {
-			if err := s.mailer.Send(email, "Kode OTP pemulihan password SAKU", body); err != nil {
+			if err := s.mailer.Send(email, "Your SAKU password reset OTP", body); err != nil {
 				log.Printf("auth: send forgot password otp email failed: %v", err)
 			}
 		}()
@@ -179,7 +179,7 @@ func (s *service) ForgotPassword(_ context.Context, req dto.ForgotPasswordReques
 func forgotPasswordEmailHTML(name, email, otp string) string {
 	displayName := strings.TrimSpace(name)
 	if displayName == "" {
-		displayName = "Pengguna SAKU"
+		displayName = "SAKU user"
 	}
 
 	accountEmail := strings.TrimSpace(email)
@@ -193,7 +193,7 @@ func forgotPasswordEmailHTML(name, email, otp string) string {
 	}
 
 	return fmt.Sprintf(`<!doctype html>
-<html lang="id">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -223,7 +223,7 @@ func forgotPasswordEmailHTML(name, email, otp string) string {
 
 <body style="margin:0;padding:0;background:#ffffff;">
   <div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;color:#ffffff;line-height:1px;">
-    Kode OTP reset password SAKU berlaku selama 10 menit. Jangan bagikan kode ini kepada siapa pun.
+    Your SAKU password reset OTP is valid for 10 minutes. Do not share this code with anyone.
   </div>
 
   <table role="presentation" width="100%%" cellpadding="0" cellspacing="0" border="0" style="background:#ffffff;">
@@ -263,18 +263,18 @@ func forgotPasswordEmailHTML(name, email, otp string) string {
           <tr>
             <td style="padding:28px;">
               <h1 style="margin:0 0 12px;font-size:18px;font-weight:800;color:#0f172a;line-height:1.35;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">
-                Verifikasi identitas Anda
+                Verify your identity
               </h1>
 
               <p style="margin:0 0 22px;font-size:14px;line-height:1.8;color:#475569;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">
-                Halo <strong style="color:#0f172a;">%s</strong>, kami menerima permintaan reset password. Gunakan kode berikut dan jangan bagikan kepada siapa pun.
+                Hi <strong style="color:#0f172a;">%s</strong>, we received a password reset request. Use the code below and do not share it with anyone.
               </p>
 
               <table role="presentation" width="100%%" cellpadding="0" cellspacing="0" border="0" style="background:#f8fbff;border:1px solid #dbeafe;border-radius:16px;margin-bottom:14px;">
                 <tr>
                   <td align="center" style="padding:22px;">
                     <div style="font-size:11px;font-weight:800;letter-spacing:.18em;color:#2563eb;margin-bottom:14px;text-transform:uppercase;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">
-                      Kode OTP
+                      OTP Code
                     </div>
 
                     <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 auto;">
@@ -288,7 +288,7 @@ func forgotPasswordEmailHTML(name, email, otp string) string {
                     </table>
 
                     <div style="margin-top:14px;font-size:13px;font-weight:700;color:#2563eb;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">
-                      Berlaku selama 10 menit
+                      Valid for 10 minutes
                     </div>
                   </td>
                 </tr>
@@ -300,7 +300,7 @@ func forgotPasswordEmailHTML(name, email, otp string) string {
                     <table role="presentation" width="100%%" cellpadding="0" cellspacing="0" border="0" style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;">
                       <tr>
                         <td style="padding:14px;">
-                          <div style="font-size:10px;font-weight:800;color:#15803d;margin-bottom:4px;letter-spacing:.08em;text-transform:uppercase;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">Email Anda</div>
+                          <div style="font-size:10px;font-weight:800;color:#15803d;margin-bottom:4px;letter-spacing:.08em;text-transform:uppercase;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">Your Email</div>
                           <div style="font-size:13px;font-weight:700;color:#166534;word-break:break-word;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">%s</div>
                         </td>
                       </tr>
@@ -313,14 +313,14 @@ func forgotPasswordEmailHTML(name, email, otp string) string {
                 <tr>
                   <td style="padding:14px;">
                     <p style="margin:0;font-size:13px;line-height:1.7;color:#9a3412;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">
-                      <strong>Bukan Anda?</strong> Abaikan email ini dan akun tetap aman.
+                      <strong>Not you?</strong> Ignore this email and your account will remain safe.
                     </p>
                   </td>
                 </tr>
               </table>
 
               <p style="margin:0;font-size:12px;line-height:1.7;color:#94a3b8;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">
-                SAKU tidak pernah meminta OTP melalui chat, telepon, atau email.
+                SAKU will never ask for your OTP through chat, phone, or email.
               </p>
             </td>
           </tr>
@@ -328,7 +328,7 @@ func forgotPasswordEmailHTML(name, email, otp string) string {
           <tr>
             <td style="padding:16px;border-top:1px solid #eef2f7;text-align:center;background:#ffffff;">
               <p style="margin:0;font-size:11px;color:#64748b;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">
-                &copy; 2026 SAKU &middot; Email otomatis, mohon tidak dibalas
+                &copy; 2026 SAKU &middot; Automated email, please do not reply
               </p>
             </td>
           </tr>

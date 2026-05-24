@@ -16,9 +16,11 @@ import (
 	"github.com/ganiramadhan/starter-go/internal/dto"
 	"github.com/ganiramadhan/starter-go/internal/modules/ailog"
 	"github.com/ganiramadhan/starter-go/internal/modules/category"
+	"github.com/ganiramadhan/starter-go/internal/modules/subscription"
 	"github.com/ganiramadhan/starter-go/internal/modules/transaction"
 	aiplatform "github.com/ganiramadhan/starter-go/internal/platform/ai"
 	"github.com/ganiramadhan/starter-go/internal/platform/storage"
+	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 )
 
@@ -30,6 +32,13 @@ const (
 	featureInsights      = "insights"
 	featureSuggestBudget = "suggest_budget"
 	featureChat          = "chat"
+
+	freeScanReceiptDailyLimit = 3
+	freeChatDailyLimit        = 5
+	proChatMonthlyLimit       = 300
+	proScanMonthlyLimit       = 90
+	premiumChatMonthlyLimit   = 1200
+	premiumScanMonthlyLimit   = 300
 )
 
 type Service interface {
@@ -47,13 +56,74 @@ type service struct {
 	logs    ailog.Service
 	storage storage.Storage
 	model   string
+	subs    subscription.Service
 }
 
-func NewService(claude *aiplatform.Client, txns transaction.Repository, cats category.Repository, logs ailog.Service, store storage.Storage, model string) Service {
+func NewService(claude *aiplatform.Client, txns transaction.Repository, cats category.Repository, logs ailog.Service, store storage.Storage, model string, subs ...subscription.Service) Service {
 	if model == "" {
 		model = "claude-sonnet-4-5"
 	}
-	return &service{claude: claude, txns: txns, cats: cats, logs: logs, storage: store, model: model}
+	var subSvc subscription.Service
+	if len(subs) > 0 {
+		subSvc = subs[0]
+	}
+	return &service{claude: claude, txns: txns, cats: cats, logs: logs, storage: store, model: model, subs: subSvc}
+}
+
+func (s *service) enforceDailyQuota(ctx context.Context, userID uuid.UUID, features []string, limit int, message string) error {
+	planCode := "free"
+	hasActivePlan := false
+	if s.subs != nil {
+		code, active, err := s.subs.ActivePlanCode(ctx, userID)
+		if err != nil {
+			return err
+		}
+		planCode = code
+		hasActivePlan = active
+	}
+	if s.logs == nil || limit <= 0 {
+		return nil
+	}
+
+	now := time.Now()
+	since := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	effectiveLimit := limit
+	effectiveMessage := message
+	if hasActivePlan {
+		since = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
+		if containsFeature(features, featureScanReceipt) {
+			effectiveLimit = proScanMonthlyLimit
+			effectiveMessage = "Pro plan monthly receipt scan limit reached. Upgrade to Premium for more receipt scans"
+			if strings.Contains(planCode, "premium") {
+				effectiveLimit = premiumScanMonthlyLimit
+				effectiveMessage = "Premium plan monthly receipt scan limit reached"
+			}
+		} else {
+			effectiveLimit = proChatMonthlyLimit
+			effectiveMessage = "Pro plan monthly AI limit reached. Upgrade to Premium for more AI prompts"
+			if strings.Contains(planCode, "premium") {
+				effectiveLimit = premiumChatMonthlyLimit
+				effectiveMessage = "Premium plan monthly AI limit reached"
+			}
+		}
+	}
+	used, err := s.logs.CountByUserSince(ctx, userID, features, since)
+	if err != nil {
+		return err
+	}
+	if used >= int64(effectiveLimit) {
+		return fiber.NewError(fiber.StatusForbidden, effectiveMessage)
+	}
+	return nil
+}
+
+func containsFeature(features []string, feature string) bool {
+	for _, item := range features {
+		if item == feature {
+			return true
+		}
+	}
+	return false
 }
 
 const systemPrompt = `You are SAKU, an AI assistant for personal finance.
@@ -92,6 +162,9 @@ OUTPUT RULES:
 // ─── 1. Categorize from raw text ────────────────────────────────────────────
 
 func (s *service) Categorize(ctx context.Context, userID uuid.UUID, req dto.CategorizeRequest) (dto.CategorizeResponse, error) {
+	if err := s.enforceDailyQuota(ctx, userID, []string{featureCategorize, featureChat}, freeChatDailyLimit, "Free plan can use Chat with AI up to 5 times per day. Upgrade to Pro for unlimited AI chat"); err != nil {
+		return dto.CategorizeResponse{}, err
+	}
 	cats := s.resolveCategories(userID, req.UserCategories)
 	now := time.Now()
 	today := now.Format("2006-01-02")
@@ -246,6 +319,9 @@ func extractCategorizeItems(parsed map[string]any) []dto.CategorizeItem {
 }
 
 func (s *service) ScanReceipt(ctx context.Context, userID uuid.UUID, req dto.ScanReceiptRequest) (dto.ScanReceiptResponse, error) {
+	if err := s.enforceDailyQuota(ctx, userID, []string{featureScanReceipt}, freeScanReceiptDailyLimit, "Free plan can scan receipts up to 3 times per day. Upgrade to Pro for unlimited receipt scanning"); err != nil {
+		return dto.ScanReceiptResponse{}, err
+	}
 	cats := s.resolveCategories(userID, req.UserCategories)
 	mediaType := req.MediaType
 	if mediaType == "" {
@@ -489,13 +565,17 @@ Return ONLY this JSON:
 }
 
 func (s *service) Chat(ctx context.Context, userID uuid.UUID, req dto.ChatRequest) (dto.ChatResponse, error) {
+	if err := s.enforceDailyQuota(ctx, userID, []string{featureCategorize, featureChat}, freeChatDailyLimit, "Free plan can use Chat with AI up to 5 times per day. Upgrade to Pro for unlimited AI chat"); err != nil {
+		return dto.ChatResponse{}, err
+	}
+	lang := preferredLanguage(req.Message, req.Language)
 	if isHelpMessage(req.Message) {
-		reply := "Panduan Chatbot:\n1. Tanyakan ringkasan pengeluaran, kategori terbesar, atau perbandingan bulan ini.\n2. Minta format spesifik seperti list singkat atau tabel.\n3. Jawaban memakai data transaksi yang tersedia di akunmu.\n4. Untuk mencatat transaksi, gunakan mode NLP dan tulis contoh seperti \"beli kopi 25rb\"."
+		reply := localizedChatHelp(lang)
 		s.record(userID, aiLogEntry{Feature: featureChat, Status: "success", LatencyMs: 0, Raw: map[string]any{"message": req.Message, "reply": reply, "session_id": req.SessionID}})
 		return dto.ChatResponse{Reply: reply}, nil
 	}
 	if isHardOffTopic(req.Message) {
-		reply := "Maaf, saya hanya bisa membantu seputar keuangan pribadi dan fitur SAKU. Boleh tanya soal pengeluaran, anggaran, atau transaksi kamu."
+		reply := localizedOffTopic(lang)
 		s.record(userID, aiLogEntry{Feature: featureChat, Status: "success", LatencyMs: 0, Raw: map[string]any{"message": req.Message, "reply": reply, "refused": true, "session_id": req.SessionID}})
 		return dto.ChatResponse{Reply: reply}, nil
 	}
@@ -538,6 +618,13 @@ func (s *service) Chat(ctx context.Context, userID uuid.UUID, req dto.ChatReques
 		promptBuilder.WriteString("\n")
 	}
 
+	promptBuilder.WriteString("Required response language: ")
+	if lang == "en" {
+		promptBuilder.WriteString("English. If the user's message is English, answer in English even if transaction names are Indonesian.\n\n")
+	} else {
+		promptBuilder.WriteString("Bahasa Indonesia.\n\n")
+	}
+
 	promptBuilder.WriteString("User question: ")
 	promptBuilder.WriteString(req.Message)
 
@@ -558,6 +645,46 @@ func (s *service) Chat(ctx context.Context, userID uuid.UUID, req dto.ChatReques
 func isHelpMessage(msg string) bool {
 	m := strings.ToLower(strings.TrimSpace(msg))
 	return m == "help" || m == "bantuan" || m == "panduan"
+}
+
+func preferredLanguage(message, requested string) string {
+	requested = strings.ToLower(strings.TrimSpace(requested))
+	if requested == "en" || requested == "id" {
+		return requested
+	}
+	m := strings.ToLower(strings.TrimSpace(message))
+	englishHints := []string{"what", "which", "how", "why", "total", "spending", "income", "expense", "budget", "wallet", "category", "compare", "summarize", "show", "list", "this month", "last month"}
+	indonesianHints := []string{"apa", "berapa", "mana", "bagaimana", "pengeluaran", "pemasukan", "dompet", "kategori", "bulan ini", "bulan lalu", "bandingkan", "ringkas", "tampilkan"}
+	englishScore := 0
+	indonesianScore := 0
+	for _, hint := range englishHints {
+		if strings.Contains(m, hint) {
+			englishScore++
+		}
+	}
+	for _, hint := range indonesianHints {
+		if strings.Contains(m, hint) {
+			indonesianScore++
+		}
+	}
+	if englishScore > indonesianScore {
+		return "en"
+	}
+	return "id"
+}
+
+func localizedChatHelp(lang string) string {
+	if lang == "en" {
+		return "Chatbot guide:\n1. Ask for spending summaries, largest categories, or month comparisons.\n2. Request a specific format such as a short list or table.\n3. Answers use the transaction data available in your account.\n4. To record a transaction, use NLP mode and write something like \"coffee 25k\"."
+	}
+	return "Panduan Chatbot:\n1. Tanyakan ringkasan pengeluaran, kategori terbesar, atau perbandingan bulan ini.\n2. Minta format spesifik seperti list singkat atau tabel.\n3. Jawaban memakai data transaksi yang tersedia di akunmu.\n4. Untuk mencatat transaksi, gunakan mode NLP dan tulis contoh seperti \"beli kopi 25rb\"."
+}
+
+func localizedOffTopic(lang string) string {
+	if lang == "en" {
+		return "Sorry, I can only help with personal finance and SAKU features. You can ask about spending, budgets, or your transactions."
+	}
+	return "Maaf, saya hanya bisa membantu seputar keuangan pribadi dan fitur SAKU. Boleh tanya soal pengeluaran, anggaran, atau transaksi kamu."
 }
 
 func isHardOffTopic(msg string) bool {

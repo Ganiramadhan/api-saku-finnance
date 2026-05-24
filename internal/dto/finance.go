@@ -28,6 +28,13 @@ type UpdateWalletRequest struct {
 	TargetDeadline *time.Time `json:"target_deadline"`
 }
 
+type TransferWalletBalanceRequest struct {
+	FromWalletID      uuid.UUID `json:"from_wallet_id" validate:"required"`
+	ToWalletID        uuid.UUID `json:"to_wallet_id" validate:"required"`
+	Amount            float64   `json:"amount" validate:"required,gt=0"`
+	ClearSourceTarget bool      `json:"clear_source_target"`
+}
+
 type WalletResponse struct {
 	ID             uuid.UUID  `json:"id"`
 	UserID         uuid.UUID  `json:"user_id"`
@@ -173,6 +180,7 @@ type CategorizeRequest struct {
 	Text           string   `json:"text" validate:"required,min=3" example:"Starbucks Coffee Rp 87.500"`
 	UserCategories []string `json:"user_categories" validate:"omitempty" example:"Food,Shopping,Transport"`
 	SessionID      string   `json:"session_id,omitempty" validate:"omitempty,max=120"`
+	Language       string   `json:"language,omitempty" validate:"omitempty,oneof=id en"`
 }
 
 type CategorizeResponse struct {
@@ -265,6 +273,7 @@ type ChatRequest struct {
 	IncludeContext bool       `json:"include_context" example:"true"`
 	History        []ChatTurn `json:"history,omitempty"`
 	SessionID      string     `json:"session_id,omitempty" validate:"omitempty,max=120"`
+	Language       string     `json:"language,omitempty" validate:"omitempty,oneof=id en"`
 }
 
 type ChatResponse struct {

@@ -67,6 +67,7 @@ func Register(app *fiber.App, h Handlers, jwtMgr *jwt.Manager) {
 	wallets := v1.Group("/wallets", authRequired)
 	wallets.Get("", h.Wallet.List)
 	wallets.Post("", h.Wallet.Create)
+	wallets.Post("/transfer", h.Wallet.Transfer)
 	wallets.Get("/:id", h.Wallet.Get)
 	wallets.Put("/:id", h.Wallet.Update)
 	wallets.Delete("/:id", h.Wallet.Delete)

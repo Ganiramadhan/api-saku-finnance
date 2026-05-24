@@ -2,25 +2,42 @@ package wallet
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/ganiramadhan/starter-go/internal/domain"
 	"github.com/ganiramadhan/starter-go/internal/dto"
+	"github.com/ganiramadhan/starter-go/internal/modules/subscription"
+	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
+
+const freeWalletLimit = 2
+const proWalletLimit = 10
+const premiumWalletLimit = 50
 
 type Service interface {
 	List(ctx context.Context, userID uuid.UUID) ([]dto.WalletResponse, error)
 	Get(ctx context.Context, userID, id uuid.UUID) (*dto.WalletResponse, error)
 	Create(ctx context.Context, userID uuid.UUID, req dto.CreateWalletRequest) (*dto.WalletResponse, error)
 	Update(ctx context.Context, userID, id uuid.UUID, req dto.UpdateWalletRequest) (*dto.WalletResponse, error)
+	Transfer(ctx context.Context, userID uuid.UUID, req dto.TransferWalletBalanceRequest) error
 	Delete(ctx context.Context, userID, id uuid.UUID) error
 }
 
-type service struct{ repo Repository }
+type service struct {
+	repo          Repository
+	subscriptions subscription.Service
+}
 
-func NewService(r Repository) Service { return &service{repo: r} }
+func NewService(r Repository, subs ...subscription.Service) Service {
+	var subSvc subscription.Service
+	if len(subs) > 0 {
+		subSvc = subs[0]
+	}
+	return &service{repo: r, subscriptions: subSvc}
+}
 
 func toResp(w domain.Wallet) dto.WalletResponse {
 	var targetName *string
@@ -68,7 +85,10 @@ func (s *service) Get(_ context.Context, userID, id uuid.UUID) (*dto.WalletRespo
 	return &r, nil
 }
 
-func (s *service) Create(_ context.Context, userID uuid.UUID, req dto.CreateWalletRequest) (*dto.WalletResponse, error) {
+func (s *service) Create(ctx context.Context, userID uuid.UUID, req dto.CreateWalletRequest) (*dto.WalletResponse, error) {
+	if err := s.enforceFreeWalletLimit(ctx, userID); err != nil {
+		return nil, err
+	}
 	currency := req.Currency
 	if currency == "" {
 		currency = "IDR"
@@ -156,8 +176,75 @@ func (s *service) Update(_ context.Context, userID, id uuid.UUID, req dto.Update
 	return &r, nil
 }
 
+func (s *service) Transfer(_ context.Context, userID uuid.UUID, req dto.TransferWalletBalanceRequest) error {
+	if req.FromWalletID == req.ToWalletID {
+		return fiber.NewError(fiber.StatusBadRequest, "Source and destination wallets must be different")
+	}
+
+	from, err := s.repo.FindByID(userID, req.FromWalletID)
+	if err != nil {
+		return err
+	}
+	to, err := s.repo.FindByID(userID, req.ToWalletID)
+	if err != nil {
+		return err
+	}
+	if from.Currency != to.Currency {
+		return fiber.NewError(fiber.StatusBadRequest, "Wallet currencies must match")
+	}
+	if from.BalanceCached < req.Amount {
+		return fiber.NewError(fiber.StatusBadRequest, "Source wallet balance is not enough")
+	}
+	if from.Target != nil && !req.ClearSourceTarget {
+		return fiber.NewError(fiber.StatusConflict, "Source wallet has an active target. Confirm target removal before transferring balance")
+	}
+
+	return s.repo.DB().Transaction(func(tx *gorm.DB) error {
+		txr := s.repo.WithTx(tx)
+		from.BalanceCached -= req.Amount
+		to.BalanceCached += req.Amount
+		if err := txr.Update(from); err != nil {
+			return err
+		}
+		if err := txr.Update(to); err != nil {
+			return err
+		}
+		if from.Target != nil {
+			return tx.Where("wallet_id = ?", from.ID).Delete(&domain.WalletTarget{}).Error
+		}
+		return nil
+	})
+}
+
 func (s *service) Delete(_ context.Context, userID, id uuid.UUID) error {
 	return s.repo.Delete(userID, id)
+}
+
+func (s *service) enforceFreeWalletLimit(ctx context.Context, userID uuid.UUID) error {
+	limit := freeWalletLimit
+	message := "Free plan can create up to 2 wallets. Upgrade to Pro for more wallets"
+	if s.subscriptions != nil {
+		planCode, active, err := s.subscriptions.ActivePlanCode(ctx, userID)
+		if err != nil {
+			return err
+		}
+		if active {
+			limit = proWalletLimit
+			message = "Pro plan can create up to 10 wallets. Upgrade to Premium for more wallets"
+			if strings.Contains(planCode, "premium") {
+				limit = premiumWalletLimit
+				message = "Premium plan can create up to 50 wallets"
+			}
+		}
+	}
+	rows, err := s.repo.List(userID)
+	if err != nil {
+		return err
+	}
+	if len(rows) >= limit {
+		return fiber.NewError(fiber.StatusForbidden, message)
+	}
+	return nil
 }
 
 func upsertWalletTarget(tx *gorm.DB, walletID uuid.UUID, name *string, amount *float64, deadline *time.Time) error {

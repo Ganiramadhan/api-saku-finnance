@@ -175,6 +175,8 @@ var indexStatements = []string{
 		ON wallets (user_id) WHERE is_default = true AND deleted_at IS NULL`,
 	`CREATE INDEX IF NOT EXISTS idx_wallets_user_type
 		ON wallets (user_id, type) WHERE deleted_at IS NULL`,
+	`CREATE INDEX IF NOT EXISTS idx_wallets_user_id
+		ON wallets (user_id, id) WHERE deleted_at IS NULL`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS idx_wallet_targets_wallet ON wallet_targets (wallet_id)`,
 
 	`CREATE INDEX IF NOT EXISTS idx_categories_user_type
@@ -188,6 +190,8 @@ var indexStatements = []string{
 		ON transactions (category_id, transaction_date DESC) WHERE deleted_at IS NULL`,
 	`CREATE INDEX IF NOT EXISTS idx_transactions_date
 		ON transactions (transaction_date DESC) WHERE deleted_at IS NULL`,
+	`CREATE INDEX IF NOT EXISTS idx_transactions_date_wallet
+		ON transactions (transaction_date DESC, wallet_id) WHERE deleted_at IS NULL`,
 	`CREATE INDEX IF NOT EXISTS idx_transactions_type
 		ON transactions (type) WHERE deleted_at IS NULL`,
 	`CREATE INDEX IF NOT EXISTS idx_transactions_source

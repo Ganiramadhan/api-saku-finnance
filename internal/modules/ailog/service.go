@@ -17,6 +17,7 @@ const scanImagePresignTTL = 6 * time.Hour
 type Service interface {
 	List(ctx context.Context, userID uuid.UUID, feature string, page, limit int) ([]dto.AIProcessingLogResponse, *dto.PaginationMeta, error)
 	ListAll(ctx context.Context, page, limit int) ([]dto.AIProcessingLogResponse, *dto.PaginationMeta, error)
+	CountByUserSince(ctx context.Context, userID uuid.UUID, features []string, since time.Time) (int64, error)
 	Delete(ctx context.Context, userID, id uuid.UUID) error
 	DeleteMany(ctx context.Context, userID uuid.UUID, ids []uuid.UUID) error
 	Record(ctx context.Context, userID uuid.UUID, entry RecordInput) error
@@ -115,6 +116,10 @@ func (s *service) ListAll(ctx context.Context, page, limit int) ([]dto.AIProcess
 		out = append(out, s.toResp(ctx, l))
 	}
 	return out, dto.NewMeta(page, limit, total), nil
+}
+
+func (s *service) CountByUserSince(_ context.Context, userID uuid.UUID, features []string, since time.Time) (int64, error) {
+	return s.repo.CountByUserSince(userID, features, since)
 }
 
 func (s *service) Delete(ctx context.Context, userID, id uuid.UUID) error {

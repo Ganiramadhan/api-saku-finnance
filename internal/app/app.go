@@ -201,7 +201,10 @@ func (a *App) initHTTP() {
 	// Services
 	userSvc := user.NewService(userRepo, a.storage)
 	authSvc := auth.NewService(userRepo, jwtMgr, a.cfg.Google.ClientID, mailClient)
-	walletSvc := wallet.NewService(walletRepo)
+	midtransClient := subscription.NewMidtransClient(a.cfg.Midtrans.ServerKey, a.cfg.Midtrans.IsProduction)
+	subSvc := subscription.NewService(subRepo, userRepo, midtransClient, a.cfg.Midtrans.ClientKey, a.cfg.Midtrans.IsProduction)
+	a.subSvc = subSvc
+	walletSvc := wallet.NewService(walletRepo, subSvc)
 	categorySvc := category.NewService(categoryRepo)
 	txnSvc := transaction.NewService(txnRepo, walletRepo, categoryRepo)
 	txnExportSvc := transaction.NewExportService(txnRepo, walletRepo, categoryRepo)
@@ -209,15 +212,12 @@ func (a *App) initHTTP() {
 	budgetSvc := budget.NewService(budgetRepo, walletRepo, categoryRepo)
 	goalSvc := savingsgoal.NewService(goalRepo)
 	splitSvc := splitbill.NewService(splitRepo)
-	billingSvc := upcomingbilling.NewService(billingRepo)
+	billingSvc := upcomingbilling.NewService(billingRepo, subSvc)
 	notificationSvc := notification.NewService(notificationRepo)
-	midtransClient := subscription.NewMidtransClient(a.cfg.Midtrans.ServerKey, a.cfg.Midtrans.IsProduction)
-	subSvc := subscription.NewService(subRepo, userRepo, midtransClient, a.cfg.Midtrans.ClientKey, a.cfg.Midtrans.IsProduction)
-	a.subSvc = subSvc
 
 	// AI (Claude)
 	claudeClient := aiplatform.NewClient(a.cfg.Claude.APIKey, a.cfg.Claude.Model)
-	aiSvc := aimodule.NewService(claudeClient, txnRepo, categoryRepo, aiLogSvc, a.storage, a.cfg.Claude.Model)
+	aiSvc := aimodule.NewService(claudeClient, txnRepo, categoryRepo, aiLogSvc, a.storage, a.cfg.Claude.Model, subSvc)
 
 	txnHandler := transaction.NewHandler(txnSvc, a.validator)
 	txnHandler.SetExportService(txnExportSvc)
@@ -279,12 +279,12 @@ func (a *App) runReminderPass(
 			if item.User == nil || daysUntilUTC(today, item.DueDate) != 7 {
 				continue
 			}
-			title := "Reminder tagihan 7 hari lagi"
-			message := fmt.Sprintf("%s jatuh tempo pada %s dengan nominal %s.", item.Name, item.DueDate.Format("02 Jan 2006"), formatMoney(item.Amount, item.Currency))
+			title := "Bill reminder in 7 days"
+			message := fmt.Sprintf("%s is due on %s for %s.", item.Name, item.DueDate.Format("02 Jan 2006"), formatMoney(item.Amount, item.Currency))
 			_ = notificationSvc.Create(ctx, domain.Notification{
 				UserID: item.UserID, Type: "upcoming_billing_reminder", Title: title, Message: message, RefType: "upcoming_billing", RefID: item.ID.String(),
 			})
-			_ = mailClient.Send(item.User.Email, title, message+"\n\nBuka SAKU untuk mengecek cashflow dan menyiapkan pembayaran.")
+			_ = mailClient.Send(item.User.Email, title, message+"\n\nOpen SAKU to review cashflow and prepare the payment.")
 		}
 	}
 
@@ -311,12 +311,12 @@ func (a *App) runReminderPass(
 		if daysUntilUTC(today, *due) != window {
 			continue
 		}
-		title := fmt.Sprintf("Reminder langganan %d hari lagi", window)
-		message := fmt.Sprintf("Langganan %s akan diperbarui pada %s dengan nominal %s.", sub.Plan.Name, due.Format("02 Jan 2006"), formatMoney(sub.Amount, sub.Currency))
+		title := fmt.Sprintf("Subscription reminder in %d days", window)
+		message := fmt.Sprintf("Your %s subscription renews on %s for %s.", sub.Plan.Name, due.Format("02 Jan 2006"), formatMoney(sub.Amount, sub.Currency))
 		_ = notificationSvc.Create(ctx, domain.Notification{
 			UserID: sub.UserID, Type: "subscription_reminder", Title: title, Message: message, RefType: "subscription", RefID: sub.ID.String(),
 		})
-		_ = mailClient.Send(sub.User.Email, title, message+"\n\nBuka SAKU untuk mengelola langgananmu.")
+		_ = mailClient.Send(sub.User.Email, title, message+"\n\nOpen SAKU to manage your subscription.")
 	}
 }
 

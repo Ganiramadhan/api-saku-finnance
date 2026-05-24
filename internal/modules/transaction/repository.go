@@ -85,7 +85,7 @@ func (r *repository) List(f ListFilter) ([]domain.Transaction, int64, error) {
 	offset := (page - 1) * limit
 
 	var rows []domain.Transaction
-	err := q.Preload("Category").Preload("Wallet").
+	err := q.
 		Order("transactions.transaction_date DESC").
 		Limit(limit).Offset(offset).Find(&rows).Error
 	return rows, total, err
@@ -94,7 +94,6 @@ func (r *repository) List(f ListFilter) ([]domain.Transaction, int64, error) {
 func (r *repository) FindByID(userID, id uuid.UUID) (*domain.Transaction, error) {
 	var t domain.Transaction
 	err := r.scoped(userID).
-		Preload("Category").Preload("Wallet").
 		Where("transactions.id = ?", id).
 		First(&t).Error
 	if err != nil {

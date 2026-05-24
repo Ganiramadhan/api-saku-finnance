@@ -48,6 +48,7 @@ func (m *MidtransClient) CreateSnapTransaction(ctx context.Context, payload map[
 		return nil, errors.New("midtrans is not configured (MIDTRANS_SERVER_KEY missing)")
 	}
 	body, err := json.Marshal(payload)
+
 	if err != nil {
 		return nil, err
 	}

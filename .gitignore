@@ -36,3 +36,6 @@ dist/
 
 # Logs
 *.log
+
+
+.gocache/

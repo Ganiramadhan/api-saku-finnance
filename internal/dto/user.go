@@ -36,7 +36,7 @@ type UserResponse struct {
 	Photo          string    `json:"photo,omitempty" example:"users/<uuid>/avatar.png"`
 	PhotoURL       string    `json:"photo_url,omitempty" example:"https://minio.local/starter/users/<uuid>/avatar.png?X-Amz-..."`
 	ReferralCode   string    `json:"referral_code,omitempty" example:"SAKU1A2B3C4D"`
-	ReferralReward int64     `json:"referral_reward,omitempty" example:"5000"`
+	ReferralReward int64     `json:"referral_reward,omitempty" example:"2000"`
 	CreatedAt      time.Time `json:"created_at,omitempty"`
 	UpdatedAt      time.Time `json:"updated_at,omitempty"`
 }

@@ -1,6 +1,8 @@
 package ailog
 
 import (
+	"time"
+
 	"github.com/ganiramadhan/starter-go/internal/domain"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -9,10 +11,21 @@ import (
 type Repository interface {
 	ListByUser(userID uuid.UUID, feature string, page, limit int) ([]domain.AIProcessingLog, int64, error)
 	ListAll(page, limit int) ([]domain.AIProcessingLog, int64, error)
+	CountByUserSince(userID uuid.UUID, features []string, since time.Time) (int64, error)
 	FindByID(userID, id uuid.UUID) (*domain.AIProcessingLog, error)
 	Create(log *domain.AIProcessingLog) error
 	Delete(userID, id uuid.UUID) error
 	DeleteMany(userID uuid.UUID, ids []uuid.UUID) error
+}
+
+func (r *repository) CountByUserSince(userID uuid.UUID, features []string, since time.Time) (int64, error) {
+	var total int64
+	q := r.db.Model(&domain.AIProcessingLog{}).
+		Where("user_id = ? AND created_at >= ?", userID, since)
+	if len(features) > 0 {
+		q = q.Where("feature IN ?", features)
+	}
+	return total, q.Count(&total).Error
 }
 
 type repository struct{ db *gorm.DB }
@@ -106,9 +119,6 @@ func (r *repository) DeleteMany(userID uuid.UUID, ids []uuid.UUID) error {
 	res := r.db.Where("user_id = ? AND id IN ?", userID, ids).Delete(&domain.AIProcessingLog{})
 	if res.Error != nil {
 		return res.Error
-	}
-	if res.RowsAffected == 0 {
-		return domain.ErrNotFound
 	}
 	return nil
 }

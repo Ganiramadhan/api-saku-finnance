@@ -115,6 +115,30 @@ func (h *Handler) Update(c *fiber.Ctx) error {
 	return httpx.OK(c, constants.MsgUpdateWallet, w)
 }
 
+// Transfer godoc
+// @Summary  Transfer balance between wallets
+// @Tags     Wallets
+// @Accept   json
+// @Produce  json
+// @Param    request body dto.TransferWalletBalanceRequest true "Transfer data"
+// @Success  200 {object} dto.APIResponse
+// @Security BearerAuth
+// @Router   /api/v1/wallets/transfer [post]
+func (h *Handler) Transfer(c *fiber.Ctx) error {
+	uid, err := httpx.UserID(c)
+	if err != nil {
+		return err
+	}
+	var req dto.TransferWalletBalanceRequest
+	if err := httpx.Bind(c, h.validator, &req); err != nil {
+		return err
+	}
+	if err := h.service.Transfer(c.Context(), uid, req); err != nil {
+		return err
+	}
+	return httpx.OK(c, "Wallet balance transferred", nil)
+}
+
 // Delete godoc
 // @Summary  Delete wallet
 // @Tags     Wallets

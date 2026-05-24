@@ -15,7 +15,7 @@ import (
 	"github.com/google/uuid"
 )
 
-const referralPaymentReward int64 = 5000
+const referralPaymentReward int64 = 2000
 
 type Service interface {
 	// Public
@@ -27,6 +27,7 @@ type Service interface {
 	ConfirmCheckout(ctx context.Context, userID uuid.UUID, req dto.ConfirmSubscriptionRequest) (*dto.SubscriptionResponse, error)
 	Cancel(ctx context.Context, userID, id uuid.UUID) error
 	HasActiveProSubscription(ctx context.Context, userID uuid.UUID) (bool, error)
+	ActivePlanCode(ctx context.Context, userID uuid.UUID) (string, bool, error)
 	// Admin
 	ListAllAdmin(ctx context.Context, limit, offset int) ([]dto.AdminSubscriptionResponse, error)
 	// Webhook
@@ -381,5 +382,31 @@ func (s *service) HasActiveProSubscription(_ context.Context, userID uuid.UUID) 
 	if sub == nil {
 		return false, nil
 	}
-	return sub.Status == domain.SubscriptionStatusActive, nil
+	if sub.Status != domain.SubscriptionStatusActive {
+		return false, nil
+	}
+	planCode := ""
+	if sub.Plan != nil {
+		planCode = sub.Plan.Code
+	} else if plan, err := s.repo.FindPlanByID(sub.PlanID); err == nil {
+		planCode = plan.Code
+	}
+	return strings.HasPrefix(planCode, "pro") || strings.HasPrefix(planCode, "premium"), nil
+}
+
+func (s *service) ActivePlanCode(_ context.Context, userID uuid.UUID) (string, bool, error) {
+	sub, err := s.repo.FindActiveByUserID(userID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return "free", false, nil
+		}
+		return "free", false, err
+	}
+	if sub == nil || sub.Status != domain.SubscriptionStatusActive {
+		return "free", false, nil
+	}
+	if sub.Plan != nil && sub.Plan.Code != "" {
+		return sub.Plan.Code, true, nil
+	}
+	return "pro", true, nil
 }
