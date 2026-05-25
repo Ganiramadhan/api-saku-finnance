@@ -205,7 +205,7 @@ func (a *App) initHTTP() {
 	userSvc := user.NewService(userRepo, a.storage)
 	authSvc := auth.NewService(userRepo, jwtMgr, a.cfg.Google.ClientID, mailClient)
 	midtransClient := subscription.NewMidtransClient(a.cfg.Midtrans.ServerKey, a.cfg.Midtrans.IsProduction)
-	subSvc := subscription.NewService(subRepo, userRepo, midtransClient, a.cfg.Midtrans.ClientKey, a.cfg.Midtrans.IsProduction)
+	subSvc := subscription.NewService(subRepo, userRepo, midtransClient, mailClient, a.cfg.Midtrans.ClientKey, a.cfg.Midtrans.IsProduction)
 	a.subSvc = subSvc
 	walletSvc := wallet.NewService(walletRepo, subSvc)
 	categorySvc := category.NewService(categoryRepo)

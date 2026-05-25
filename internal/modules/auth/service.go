@@ -81,6 +81,11 @@ func (s *service) Login(_ context.Context, req dto.LoginRequest) (*dto.AuthRespo
 		}
 		u.Referral = ref
 	}
+	now := time.Now().UTC()
+	u.LastLoginAt = &now
+	if err := s.users.Update(u); err != nil {
+		return nil, err
+	}
 	token, err := s.jwt.Generate(u.ID, u.Email, u.Role)
 	if err != nil {
 		return nil, err
@@ -692,6 +697,11 @@ func (s *service) GoogleLogin(ctx context.Context, req dto.GoogleLoginRequest) (
 		}
 		u.Referral = ref
 	}
+	now := time.Now().UTC()
+	u.LastLoginAt = &now
+	if err := s.users.Update(u); err != nil {
+		return nil, err
+	}
 	token, err := s.jwt.Generate(u.ID, u.Email, u.Role)
 	if err != nil {
 		return nil, err
@@ -709,6 +719,7 @@ func authUserResponse(u *domain.User) dto.UserResponse {
 		Photo:        u.Photo,
 		PhotoURL:     externalPhotoURL(u.Photo),
 		Status:       u.Status,
+		LastLoginAt:  u.LastLoginAt,
 	}
 	if u.Referral != nil {
 		resp.ReferralCode = u.Referral.Code

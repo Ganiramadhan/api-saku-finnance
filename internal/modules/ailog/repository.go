@@ -73,7 +73,7 @@ func (r *repository) ListSavedScanReceipts(userID uuid.UUID, page, limit int) ([
 		total int64
 	)
 	q := r.db.Model(&domain.AIProcessingLog{}).
-		Where("user_id = ? AND feature = ? AND raw_response LIKE ?", userID, "scan_receipt", `%"saved":true%`)
+		Where("user_id = ? AND feature = ? AND raw_response::text LIKE ?", userID, "scan_receipt", `%"saved":true%`)
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}

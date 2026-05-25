@@ -166,6 +166,7 @@ var indexStatements = []string{
 		ON users (email) WHERE deleted_at IS NULL`,
 	`CREATE INDEX IF NOT EXISTS idx_users_status ON users (status)`,
 	`CREATE INDEX IF NOT EXISTS idx_users_auth_provider ON users (auth_provider)`,
+	`CREATE INDEX IF NOT EXISTS idx_users_last_login_at ON users (last_login_at DESC)`,
 
 	`CREATE UNIQUE INDEX IF NOT EXISTS idx_user_referrals_code ON user_referrals (code)`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS idx_user_referrals_user ON user_referrals (user_id)`,

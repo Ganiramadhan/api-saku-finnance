@@ -12,6 +12,7 @@ import (
 	"github.com/ganiramadhan/starter-go/internal/domain"
 	"github.com/ganiramadhan/starter-go/internal/dto"
 	"github.com/ganiramadhan/starter-go/internal/modules/user"
+	"github.com/ganiramadhan/starter-go/internal/platform/mailer"
 	"github.com/google/uuid"
 )
 
@@ -38,12 +39,13 @@ type service struct {
 	repo      Repository
 	users     user.Repository
 	midtrans  *MidtransClient
+	mailer    mailer.Mailer
 	clientKey string
 	isProd    bool
 }
 
-func NewService(repo Repository, users user.Repository, m *MidtransClient, clientKey string, isProd bool) Service {
-	return &service{repo: repo, users: users, midtrans: m, clientKey: clientKey, isProd: isProd}
+func NewService(repo Repository, users user.Repository, m *MidtransClient, mailer mailer.Mailer, clientKey string, isProd bool) Service {
+	return &service{repo: repo, users: users, midtrans: m, mailer: mailer, clientKey: clientKey, isProd: isProd}
 }
 
 func parseFeatures(raw string) []string {
@@ -238,6 +240,7 @@ func (s *service) ListAllAdmin(_ context.Context, limit, offset int) ([]dto.Admi
 		if r.User != nil {
 			entry.UserName = r.User.Name
 			entry.UserEmail = r.User.Email
+			entry.UserLastLoginAt = r.User.LastLoginAt
 			if strings.HasPrefix(r.User.Photo, "http://") || strings.HasPrefix(r.User.Photo, "https://") {
 				entry.UserPhoto = r.User.Photo
 			}
@@ -270,9 +273,13 @@ func (s *service) ConfirmCheckout(_ context.Context, userID uuid.UUID, req dto.C
 		return nil, domain.ErrUnauthorized
 	}
 	if sub.Status == domain.SubscriptionStatusPending && !s.isProd {
+		wasActive := sub.Status == domain.SubscriptionStatusActive
 		s.activate(sub)
 		if err := s.repo.UpdateSubscription(sub); err != nil {
 			return nil, err
+		}
+		if !wasActive && sub.Status == domain.SubscriptionStatusActive {
+			s.sendPaymentSuccessEmail(sub)
 		}
 	}
 	if sub.Plan == nil {
@@ -308,6 +315,7 @@ func (s *service) HandleWebhook(_ context.Context, p dto.MidtransWebhook) error 
 
 	sub.MidtransTxnID = p.TransactionID
 	sub.MidtransPaymentType = p.PaymentType
+	wasActive := sub.Status == domain.SubscriptionStatusActive
 
 	switch p.TransactionStatus {
 	case "capture":
@@ -331,7 +339,13 @@ func (s *service) HandleWebhook(_ context.Context, p dto.MidtransWebhook) error 
 	case "failure":
 		sub.Status = domain.SubscriptionStatusFailed
 	}
-	return s.repo.UpdateSubscription(sub)
+	if err := s.repo.UpdateSubscription(sub); err != nil {
+		return err
+	}
+	if !wasActive && sub.Status == domain.SubscriptionStatusActive {
+		s.sendPaymentSuccessEmail(sub)
+	}
+	return nil
 }
 
 func (s *service) activate(sub *domain.Subscription) {
@@ -368,6 +382,74 @@ func (s *service) activate(sub *domain.Subscription) {
 			sub.ReferralRewardPaid = true
 		}
 	}
+}
+
+func (s *service) sendPaymentSuccessEmail(sub *domain.Subscription) {
+	if s.mailer == nil {
+		return
+	}
+	u, err := s.users.FindByID(sub.UserID)
+	if err != nil {
+		log.Printf("subscription: payment email user lookup failed: %v", err)
+		return
+	}
+	planName := "SAKU"
+	planPeriod := ""
+	if sub.Plan == nil {
+		if p, err := s.repo.FindPlanByID(sub.PlanID); err == nil {
+			sub.Plan = p
+		}
+	}
+	if sub.Plan != nil {
+		planName = sub.Plan.Name
+		planPeriod = sub.Plan.Period
+	}
+	subject := "Your SAKU payment is confirmed"
+	body := paymentSuccessEmailHTML(u.Name, planName, planPeriod, sub.Amount, sub.Currency, sub.MidtransOrderID, sub.EndsAt)
+	if err := s.mailer.Send(u.Email, subject, body); err != nil {
+		log.Printf("subscription: queue payment success email failed: %v", err)
+	}
+}
+
+func paymentSuccessEmailHTML(name, planName, period string, amount float64, currency, orderID string, endsAt *time.Time) string {
+	displayName := strings.TrimSpace(name)
+	if displayName == "" {
+		displayName = "SAKU user"
+	}
+	validUntil := "-"
+	if endsAt != nil {
+		validUntil = endsAt.Format("02 Jan 2006 15:04 MST")
+	}
+	return fmt.Sprintf(`<!doctype html>
+<html lang="en">
+<body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Arial,sans-serif;color:#0f172a;">
+  <table role="presentation" width="100%%" cellpadding="0" cellspacing="0" border="0" style="background:#f8fafc;">
+    <tr><td align="center" style="padding:28px 16px;">
+      <table role="presentation" width="100%%" cellpadding="0" cellspacing="0" border="0" style="max-width:520px;background:#ffffff;border:1px solid #e2e8f0;border-radius:22px;overflow:hidden;box-shadow:0 16px 40px rgba(15,23,42,.08);">
+        <tr><td style="height:7px;background:#2563eb;line-height:7px;font-size:0;">&nbsp;</td></tr>
+        <tr><td style="padding:24px 26px;">
+          <table role="presentation" width="100%%"><tr>
+            <td><div style="display:inline-block;width:42px;height:42px;border-radius:12px;background:#2563eb;color:#fff;text-align:center;line-height:42px;font-size:20px;font-weight:900;">S</div></td>
+            <td align="right"><span style="display:inline-block;padding:7px 12px;border-radius:999px;background:#eff6ff;border:1px solid #bfdbfe;font-size:10px;font-weight:800;color:#1d4ed8;text-transform:uppercase;letter-spacing:.06em;">Payment confirmed</span></td>
+          </tr></table>
+          <h1 style="margin:22px 0 10px;font-size:20px;font-weight:900;line-height:1.35;color:#0f172a;">Payment received</h1>
+          <p style="margin:0 0 18px;font-size:14px;line-height:1.75;color:#475569;">Hi <strong style="color:#0f172a;">%s</strong>, your SAKU subscription payment has been confirmed.</p>
+          <div style="background:#f8fbff;border:1px solid #dbeafe;border-radius:18px;padding:18px;margin-bottom:16px;">
+            <div style="font-size:12px;color:#64748b;">Plan</div>
+            <div style="font-size:18px;font-weight:900;color:#0f172a;">%s <span style="font-size:12px;color:#2563eb;">%s</span></div>
+            <div style="height:1px;background:#e2e8f0;margin:14px 0;"></div>
+            <div style="font-size:12px;color:#64748b;">Amount</div>
+            <div style="font-size:18px;font-weight:900;color:#0f172a;">%s %.0f</div>
+            <div style="margin-top:12px;font-size:12px;color:#64748b;">Order ID: <strong style="color:#334155;">%s</strong></div>
+            <div style="margin-top:6px;font-size:12px;color:#64748b;">Active until: <strong style="color:#334155;">%s</strong></div>
+          </div>
+          <p style="margin:0;font-size:12px;line-height:1.7;color:#94a3b8;">Thank you for using SAKU. This is an automated email, please do not reply.</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`, displayName, planName, period, currency, amount, orderID, validUntil)
 }
 
 func sanitizeReferralCode(value string) string {

@@ -77,6 +77,9 @@ func (s *service) Create(ctx context.Context, req dto.CreateUserRequest) (*dto.U
 	if role == "" {
 		role = "user"
 	}
+	if role == "super_admin" {
+		return nil, domain.ErrInvalidInput
+	}
 	status := req.Status
 	if status == "" {
 		status = "active"
@@ -137,6 +140,9 @@ func (s *service) Update(ctx context.Context, id uuid.UUID, req dto.UpdateUserRe
 		u.Password = string(hashed)
 	}
 	if req.Role != "" {
+		if req.Role == "super_admin" {
+			return nil, domain.ErrInvalidInput
+		}
 		u.Role = req.Role
 	}
 	if req.Phone != "" {
@@ -223,6 +229,7 @@ func (s *service) toResponse(ctx context.Context, u domain.User) dto.UserRespons
 		Phone:        u.Phone,
 		Status:       u.Status,
 		Photo:        u.Photo,
+		LastLoginAt:  u.LastLoginAt,
 		CreatedAt:    u.CreatedAt,
 		UpdatedAt:    u.UpdatedAt,
 	}

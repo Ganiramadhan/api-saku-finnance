@@ -62,10 +62,11 @@ type SubscriptionResponse struct {
 
 type AdminSubscriptionResponse struct {
 	SubscriptionResponse
-	UserID    uuid.UUID `json:"user_id"`
-	UserName  string    `json:"user_name"`
-	UserEmail string    `json:"user_email"`
-	UserPhoto string    `json:"user_photo_url,omitempty"`
+	UserID          uuid.UUID  `json:"user_id"`
+	UserName        string     `json:"user_name"`
+	UserEmail       string     `json:"user_email"`
+	UserPhoto       string     `json:"user_photo_url,omitempty"`
+	UserLastLoginAt *time.Time `json:"user_last_login_at,omitempty"`
 }
 
 type MidtransWebhook struct {
