@@ -224,7 +224,16 @@ type ScanReceiptResponse struct {
 	NeedsReview  bool           `json:"needs_review" example:"false"`
 	OCRText      string         `json:"ocr_text,omitempty"`
 	LineItems    []string       `json:"line_items,omitempty"`
+	ImageKey     string         `json:"image_key,omitempty"`
 	RawResponse  map[string]any `json:"raw_response,omitempty" swaggertype:"object"`
+}
+
+type PromoteScanImageRequest struct {
+	ImageKey string `json:"image_key" validate:"required" example:"Temp/AI/Scans/<user-id>/<uuid>.webp"`
+}
+
+type PromoteScanImageResponse struct {
+	ImageKey string `json:"image_key" example:"AI/Scans/<user-id>/<uuid>.webp"`
 }
 
 type InsightsRequest struct {

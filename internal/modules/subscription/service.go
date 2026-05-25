@@ -114,6 +114,16 @@ func (s *service) Checkout(ctx context.Context, userID uuid.UUID, req dto.Checko
 	if plan.Price <= 0 {
 		return nil, fmt.Errorf("plan %q is free and does not require checkout", plan.Code)
 	}
+	if pending, err := s.repo.FindPendingByUserID(userID); err == nil && pending != nil {
+		return nil, fmt.Errorf("you already have a pending payment. Please cancel it before choosing another plan")
+	} else if err != nil && !errors.Is(err, domain.ErrNotFound) {
+		return nil, err
+	}
+	if active, err := s.repo.FindActiveByUserID(userID); err == nil && active != nil && active.Plan != nil && active.Plan.Code == plan.Code {
+		return nil, fmt.Errorf("you are already subscribed to this plan")
+	} else if err != nil && !errors.Is(err, domain.ErrNotFound) {
+		return nil, err
+	}
 	u, err := s.users.FindByID(userID)
 	if err != nil {
 		return nil, err
@@ -134,7 +144,7 @@ func (s *service) Checkout(ctx context.Context, userID uuid.UUID, req dto.Checko
 		referrer = found
 	}
 
-	orderID := fmt.Sprintf("SAKU-%s-%d", strings.ToUpper(plan.Code), time.Now().UnixMilli())
+	orderID := fmt.Sprintf("SAKU-%s-%s", strings.ToUpper(plan.Code), strings.ToUpper(strings.ReplaceAll(uuid.NewString()[:13], "-", "")))
 
 	chargeAmount := int64(plan.Price)
 	itemName := "SAKU " + plan.Name + " (" + plan.Period + ")"

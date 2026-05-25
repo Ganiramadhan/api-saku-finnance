@@ -6,8 +6,9 @@ import (
 )
 
 type LoginRequest struct {
-	Email    string `json:"email" validate:"required,email" example:"john@example.com"`
-	Password string `json:"password" validate:"required" example:"password123"`
+	Email          string `json:"email" validate:"required,email" example:"john@example.com"`
+	Password       string `json:"password" validate:"required" example:"password123"`
+	TurnstileToken string `json:"turnstile_token,omitempty"`
 }
 
 func (r *LoginRequest) Sanitize() {
@@ -15,9 +16,10 @@ func (r *LoginRequest) Sanitize() {
 }
 
 type RegisterRequest struct {
-	Name     string `json:"name" validate:"required,min=2,max=120" example:"John Doe"`
-	Email    string `json:"email" validate:"required,email" example:"john@example.com"`
-	Password string `json:"password" validate:"required,min=8,max=72" example:"password123"`
+	Name           string `json:"name" validate:"required,min=2,max=120" example:"John Doe"`
+	Email          string `json:"email" validate:"required,email" example:"john@example.com"`
+	Password       string `json:"password" validate:"required,min=8,max=72" example:"password123"`
+	TurnstileToken string `json:"turnstile_token,omitempty"`
 }
 
 func (r *RegisterRequest) Sanitize() {
@@ -41,7 +43,8 @@ type GoogleLoginRequest struct {
 }
 
 type ForgotPasswordRequest struct {
-	Email string `json:"email" validate:"required,email" example:"john@example.com"`
+	Email          string `json:"email" validate:"required,email" example:"john@example.com"`
+	TurnstileToken string `json:"turnstile_token,omitempty"`
 }
 
 type ResetPasswordRequest struct {

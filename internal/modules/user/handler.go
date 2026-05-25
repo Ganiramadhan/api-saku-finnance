@@ -71,7 +71,7 @@ func (h *Handler) UpdateMe(c *fiber.Ctx) error {
 
 // UploadPhoto godoc
 // @Summary   Upload user photo
-// @Description Uploads an image to temp/users/. Returns the object key — pass it as `photo` to PUT /users/me (or admin Create/Update) to attach it to a user.
+// @Description Uploads an optimized WebP image to Temp/Users/. Returns the object key — pass it as `photo` to PUT /users/me (or admin Create/Update) to attach it to a user.
 // @Tags      Users
 // @Accept    multipart/form-data
 // @Produce   json
@@ -96,7 +96,7 @@ func (h *Handler) UploadPhoto(c *fiber.Ctx) error {
 	}
 
 	ctx := c.Context()
-	key, err := h.storage.Upload(ctx, file, "temp/users")
+	key, err := h.storage.Upload(ctx, file, "Temp/Users")
 	if err != nil {
 		return fiber.NewError(http.StatusInternalServerError, constants.ErrUploadFailed+": "+err.Error())
 	}

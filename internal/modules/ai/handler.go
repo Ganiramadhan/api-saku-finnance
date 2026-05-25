@@ -75,6 +75,22 @@ func (h *Handler) ScanReceipt(c *fiber.Ctx) error {
 	return httpx.OK(c, constants.MsgAIScanReceipt, out)
 }
 
+func (h *Handler) PromoteScanImage(c *fiber.Ctx) error {
+	uid, err := httpx.UserID(c)
+	if err != nil {
+		return err
+	}
+	var req dto.PromoteScanImageRequest
+	if err := httpx.Bind(c, h.validator, &req); err != nil {
+		return err
+	}
+	out, err := h.service.PromoteScanImage(c.Context(), uid, req)
+	if err != nil {
+		return err
+	}
+	return httpx.OK(c, "Scan image promoted", out)
+}
+
 // Insights godoc
 // @Summary  AI: financial insights for the current user
 // @Description Aggregates the user's transactions over a date range and asks Claude for a narrative summary, recommendations and anomalies.

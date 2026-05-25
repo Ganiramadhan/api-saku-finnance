@@ -21,6 +21,7 @@ type Service interface {
 	Delete(ctx context.Context, userID, id uuid.UUID) error
 	DeleteMany(ctx context.Context, userID uuid.UUID, ids []uuid.UUID) error
 	Record(ctx context.Context, userID uuid.UUID, entry RecordInput) error
+	PromoteImage(ctx context.Context, userID uuid.UUID, oldKey, newKey string) error
 }
 
 type RecordInput struct {
@@ -185,4 +186,8 @@ func (s *service) Record(_ context.Context, userID uuid.UUID, in RecordInput) er
 		RawResponse:       rawResponse,
 	}
 	return s.repo.Create(&l)
+}
+
+func (s *service) PromoteImage(_ context.Context, userID uuid.UUID, oldKey, newKey string) error {
+	return s.repo.UpdateImageKey(userID, oldKey, newKey)
 }

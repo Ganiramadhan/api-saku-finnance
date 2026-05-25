@@ -16,8 +16,8 @@ import (
 
 const (
 	photoURLTTL         = 24 * time.Hour
-	uploadFolderUserTmp = "temp/users"
-	userPhotoTemplate   = "users/%s/%s"
+	uploadFolderUserTmp = "Temp/Users"
+	userPhotoTemplate   = "Users/%s/%s"
 )
 
 type Service interface {

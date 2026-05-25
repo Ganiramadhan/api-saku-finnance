@@ -164,6 +164,7 @@ func (a *App) initHTTP() {
 		TimeFormat: "2006-01-02 15:04:05",
 	}))
 	a.fiber.Use(recover.New())
+	a.fiber.Use(middleware.SecurityHeaders())
 	a.fiber.Use(cors.New(cors.Config{
 		AllowOrigins: a.cfg.CORS.AllowOrigins,
 		AllowMethods: "GET,POST,PUT,DELETE,OPTIONS",
@@ -223,7 +224,7 @@ func (a *App) initHTTP() {
 	txnHandler.SetExportService(txnExportSvc)
 
 	routes.Register(a.fiber, routes.Handlers{
-		Auth:         auth.NewHandler(authSvc, a.validator),
+		Auth:         auth.NewHandler(authSvc, a.validator, a.cfg.Turnstile.SecretKey),
 		User:         user.NewHandler(userSvc, a.storage, a.validator),
 		Wallet:       wallet.NewHandler(walletSvc, a.validator),
 		Category:     category.NewHandler(categorySvc, a.validator),

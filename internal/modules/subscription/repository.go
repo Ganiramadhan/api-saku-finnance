@@ -17,6 +17,7 @@ type Repository interface {
 	UpdateSubscription(s *domain.Subscription) error
 	FindByOrderID(orderID string) (*domain.Subscription, error)
 	FindActiveByUserID(userID uuid.UUID) (*domain.Subscription, error)
+	FindPendingByUserID(userID uuid.UUID) (*domain.Subscription, error)
 	FindByUserID(userID, id uuid.UUID) (*domain.Subscription, error)
 	ListByUserID(userID uuid.UUID) ([]domain.Subscription, error)
 	ListAll(limit, offset int) ([]domain.Subscription, error)
@@ -91,6 +92,23 @@ func (r *repository) FindActiveByUserID(userID uuid.UUID) (*domain.Subscription,
 	err := r.db.
 		Preload("Plan").
 		Where("user_id = ? AND status = ?", userID, domain.SubscriptionStatusActive).
+		Order("created_at DESC").
+		Limit(1).
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, domain.ErrNotFound
+	}
+	return &rows[0], nil
+}
+
+func (r *repository) FindPendingByUserID(userID uuid.UUID) (*domain.Subscription, error) {
+	var rows []domain.Subscription
+	err := r.db.
+		Preload("Plan").
+		Where("user_id = ? AND status = ?", userID, domain.SubscriptionStatusPending).
 		Order("created_at DESC").
 		Limit(1).
 		Find(&rows).Error

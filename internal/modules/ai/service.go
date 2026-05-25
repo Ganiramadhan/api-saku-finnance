@@ -44,6 +44,7 @@ const (
 type Service interface {
 	Categorize(ctx context.Context, userID uuid.UUID, req dto.CategorizeRequest) (dto.CategorizeResponse, error)
 	ScanReceipt(ctx context.Context, userID uuid.UUID, req dto.ScanReceiptRequest) (dto.ScanReceiptResponse, error)
+	PromoteScanImage(ctx context.Context, userID uuid.UUID, req dto.PromoteScanImageRequest) (dto.PromoteScanImageResponse, error)
 	Insights(ctx context.Context, userID uuid.UUID, req dto.InsightsRequest) (dto.InsightsResponse, error)
 	SuggestBudget(ctx context.Context, userID uuid.UUID, req dto.SuggestBudgetRequest) (dto.SuggestBudgetResponse, error)
 	Chat(ctx context.Context, userID uuid.UUID, req dto.ChatRequest) (dto.ChatResponse, error)
@@ -426,9 +427,10 @@ Return ONLY this JSON (no commentary, no markdown fences):
 	}
 	if s.storage != nil && req.ImageBase64 != "" {
 		if data, derr := base64.StdEncoding.DecodeString(req.ImageBase64); derr == nil && len(data) > 0 {
-			folder := fmt.Sprintf("ai-scans/%s", userID.String())
+			folder := fmt.Sprintf("Temp/AI/Scans/%s", userID.String())
 			if key, uerr := s.storage.UploadBytes(ctx, data, mediaType, folder, ""); uerr == nil {
 				parsed["image_key"] = key
+				out.ImageKey = key
 			} else {
 				slog.Warn("ai: scan receipt image upload failed", "user_id", userID, "error", uerr)
 			}
@@ -444,6 +446,28 @@ Return ONLY this JSON (no commentary, no markdown fences):
 		Amount: &out.Amount, Raw: parsed,
 	})
 	return out, nil
+}
+
+func (s *service) PromoteScanImage(ctx context.Context, userID uuid.UUID, req dto.PromoteScanImageRequest) (dto.PromoteScanImageResponse, error) {
+	if s.storage == nil {
+		return dto.PromoteScanImageResponse{}, fmt.Errorf("storage is not configured")
+	}
+	oldKey := strings.TrimSpace(req.ImageKey)
+	prefix := fmt.Sprintf("Temp/AI/Scans/%s/", userID.String())
+	if !strings.HasPrefix(oldKey, prefix) {
+		return dto.PromoteScanImageResponse{}, fmt.Errorf("%w: invalid scan image key", domain.ErrInvalidInput)
+	}
+	filename := oldKey[strings.LastIndex(oldKey, "/")+1:]
+	newKey := fmt.Sprintf("AI/Scans/%s/%s", userID.String(), filename)
+	if err := s.storage.Move(ctx, oldKey, newKey); err != nil {
+		return dto.PromoteScanImageResponse{}, err
+	}
+	if s.logs != nil {
+		if err := s.logs.PromoteImage(ctx, userID, oldKey, newKey); err != nil {
+			slog.Warn("ai: update promoted scan image key failed", "user_id", userID, "error", err)
+		}
+	}
+	return dto.PromoteScanImageResponse{ImageKey: newKey}, nil
 }
 
 func (s *service) Insights(ctx context.Context, userID uuid.UUID, req dto.InsightsRequest) (dto.InsightsResponse, error) {
@@ -585,13 +609,25 @@ func (s *service) Chat(ctx context.Context, userID uuid.UUID, req dto.ChatReques
 	if req.IncludeContext {
 		to := time.Now()
 		from := to.AddDate(0, -1, 0)
-		rows, _, err := s.txns.List(transaction.ListFilter{
-			UserID: userID, From: &from, To: &to, Page: 1, Limit: 50,
+		recentRows, _, err := s.txns.List(transaction.ListFilter{
+			UserID: userID, From: &from, To: &to, Page: 1, Limit: 100,
 		})
-		if err == nil && len(rows) > 0 {
-			income, expense, byCat := summarise(rows)
-			promptBuilder.WriteString(fmt.Sprintf("Context (last 30 days):\n- income=%.2f, expense=%.2f\n- top expense categories: %s\n- recent transactions:\n%s\n\n",
-				income, expense, topCategoriesString(byCat, 5), sampleRowsString(rows, 15)))
+		allRows, totalTransactions, allErr := s.txns.List(transaction.ListFilter{
+			UserID: userID, Page: 1, Limit: 1000,
+		})
+		if allErr == nil && totalTransactions > 0 {
+			income, expense, byCat := summarise(allRows)
+			promptBuilder.WriteString(fmt.Sprintf("All-time transaction context:\n- total_transactions=%d\n- loaded_transactions_for_amount_summary=%d\n- income=%.2f, expense=%.2f\n- top expense categories: %s\n",
+				totalTransactions, len(allRows), income, expense, topCategoriesString(byCat, 5)))
+			if int64(len(allRows)) < totalTransactions {
+				promptBuilder.WriteString("- Note: total_transactions is exact; income/expense/category summaries are based on loaded_transactions_for_amount_summary only.\n")
+			}
+			promptBuilder.WriteString("\n")
+		}
+		if err == nil && len(recentRows) > 0 {
+			income, expense, byCat := summarise(recentRows)
+			promptBuilder.WriteString(fmt.Sprintf("Context (last 30 days):\n- transaction_count=%d\n- income=%.2f, expense=%.2f\n- top expense categories: %s\n- recent transactions:\n%s\n\n",
+				len(recentRows), income, expense, topCategoriesString(byCat, 5), sampleRowsString(recentRows, 20)))
 		}
 	}
 

@@ -25,14 +25,23 @@ RUN --mount=type=cache,target=/go/pkg/mod \
       -ldflags="-s -w -X main.version=${VERSION}" \
       -o /out/api ./cmd/api
 
-FROM gcr.io/distroless/static-debian12:nonroot AS runtime
+FROM alpine:3.22 AS runtime
+
+RUN apk add --no-cache ca-certificates wget && \
+    addgroup -S app && adduser -S -G app app
 
 WORKDIR /app
 
-COPY --from=builder --chown=nonroot:nonroot /out/api /app/api
+ENV APP_PORT=4000
 
-COPY --from=builder --chown=nonroot:nonroot /src/envs /app/envs
+COPY --from=builder --chown=app:app /out/api /app/api
+COPY --from=builder --chown=app:app /src/envs /app/envs
 
-USER nonroot:nonroot
+USER app:app
+
+EXPOSE 4000
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+    CMD wget -qO- "http://127.0.0.1:${APP_PORT}/health" >/dev/null 2>&1 || exit 1
 
 ENTRYPOINT ["/app/api"]

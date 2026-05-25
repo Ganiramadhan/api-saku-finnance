@@ -1,5 +1,5 @@
 services:
-  api:
+  api-saku-finance:
     image: ${IMAGE_NAME}:${IMAGE_TAG}
     container_name: ${APP_NAME}
     restart: ${RESTART_POLICY}
@@ -44,6 +44,7 @@ services:
       - MIDTRANS_IS_PROD=${MIDTRANS_IS_PROD}
 
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - TURNSTILE_SECRET_KEY=${TURNSTILE_SECRET_KEY}
 
       - MAIL_MAILER=${MAIL_MAILER}
       - MAIL_HOST=${MAIL_HOST}
@@ -53,6 +54,7 @@ services:
       - MAIL_ENCRYPTION=${MAIL_ENCRYPTION}
       - MAIL_FROM_ADDRESS=${MAIL_FROM_ADDRESS}
       - MAIL_FROM_NAME=${MAIL_FROM_NAME}
+
     networks:
       - backend
 

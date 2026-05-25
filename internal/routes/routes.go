@@ -1,6 +1,8 @@
 package routes
 
 import (
+	"time"
+
 	"github.com/ganiramadhan/starter-go/internal/middleware"
 	"github.com/ganiramadhan/starter-go/internal/modules/ai"
 	"github.com/ganiramadhan/starter-go/internal/modules/ailog"
@@ -43,10 +45,10 @@ func Register(app *fiber.App, h Handlers, jwtMgr *jwt.Manager) {
 	// ---------------- Public ----------------
 	authPub := v1.Group("/auth")
 	authPub.Post("/login", middleware.LoginRateLimiter(), h.Auth.Login)
-	authPub.Post("/register", h.Auth.Register)
-	authPub.Post("/google", h.Auth.GoogleLogin)
-	authPub.Post("/forgot-password", h.Auth.ForgotPassword)
-	authPub.Post("/reset-password", h.Auth.ResetPassword)
+	authPub.Post("/register", middleware.SensitiveRateLimiter(5, time.Minute, 10*time.Minute, "Too many registration attempts. Please try again later."), h.Auth.Register)
+	authPub.Post("/google", middleware.SensitiveRateLimiter(10, time.Minute, 5*time.Minute, "Too many Google login attempts. Please try again later."), h.Auth.GoogleLogin)
+	authPub.Post("/forgot-password", middleware.SensitiveRateLimiter(3, time.Minute, 10*time.Minute, "Too many password reset attempts. Please try again later."), h.Auth.ForgotPassword)
+	authPub.Post("/reset-password", middleware.SensitiveRateLimiter(5, time.Minute, 10*time.Minute, "Too many password reset attempts. Please try again later."), h.Auth.ResetPassword)
 
 	// Public subscription catalog + Midtrans webhook
 	subsPub := v1.Group("/subscriptions")
@@ -123,14 +125,15 @@ func Register(app *fiber.App, h Handlers, jwtMgr *jwt.Manager) {
 	subs := v1.Group("/subscriptions", authRequired)
 	subs.Get("/me", h.Subscription.MySubscriptions)
 	subs.Get("/me/active", h.Subscription.ActiveSubscription)
-	subs.Post("/checkout", h.Subscription.Checkout)
-	subs.Post("/confirm", h.Subscription.ConfirmCheckout)
+	subs.Post("/checkout", middleware.SensitiveRateLimiter(6, time.Minute, 5*time.Minute, "Too many checkout attempts. Please try again later."), h.Subscription.Checkout)
+	subs.Post("/confirm", middleware.SensitiveRateLimiter(10, time.Minute, 5*time.Minute, "Too many payment confirmation attempts. Please try again later."), h.Subscription.ConfirmCheckout)
 	subs.Post("/:id/cancel", h.Subscription.Cancel)
 
 	// AI categorization
 	aiGroup := v1.Group("/ai", authRequired)
 	aiGroup.Post("/categorize", h.AI.Categorize)
 	aiGroup.Post("/scan-receipt", h.AI.ScanReceipt)
+	aiGroup.Post("/scan-receipt/promote-image", h.AI.PromoteScanImage)
 	aiGroup.Post("/insights", h.AI.Insights)
 	aiGroup.Post("/suggest-budget", h.AI.SuggestBudget)
 	aiGroup.Post("/chat", h.AI.Chat)

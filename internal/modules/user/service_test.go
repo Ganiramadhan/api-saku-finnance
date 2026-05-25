@@ -194,19 +194,19 @@ func newSvc() (*fakeRepo, *fakeStorage, Service) {
 
 func TestService_Create_PromotesPhoto(t *testing.T) {
 	repo, st, svc := newSvc()
-	st.put("temp/users/avatar-abcd.png")
+	st.put("Temp/Users/avatar-abcd.png")
 
 	resp, err := svc.Create(context.Background(), dto.CreateUserRequest{
 		Name: "John", Email: "john@example.com", Password: "secret123",
-		Photo: "temp/users/avatar-abcd.png",
+		Photo: "Temp/Users/avatar-abcd.png",
 	})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if !strings.HasPrefix(resp.Photo, "users/") {
+	if !strings.HasPrefix(resp.Photo, "Users/") {
 		t.Errorf("photo not promoted: %q", resp.Photo)
 	}
-	if st.has("temp/users/avatar-abcd.png") {
+	if st.has("Temp/Users/avatar-abcd.png") {
 		t.Error("temp object should be moved")
 	}
 	if !st.has(resp.Photo) {
@@ -222,18 +222,18 @@ func TestService_Create_PromotesPhoto(t *testing.T) {
 
 func TestService_Create_RollbackPhotoOnDBError(t *testing.T) {
 	repo, st, svc := newSvc()
-	st.put("temp/users/avatar-abcd.png")
+	st.put("Temp/Users/avatar-abcd.png")
 	repo.createErr = errors.New("db down")
 
 	_, err := svc.Create(context.Background(), dto.CreateUserRequest{
 		Name: "John", Email: "john@example.com", Password: "secret123",
-		Photo: "temp/users/avatar-abcd.png",
+		Photo: "Temp/Users/avatar-abcd.png",
 	})
 	if err == nil {
 		t.Fatal("expected error")
 	}
 	for k := range st.objects {
-		if strings.HasPrefix(k, "users/") {
+		if strings.HasPrefix(k, "Users/") {
 			t.Errorf("promoted object %q should have been rolled back", k)
 		}
 	}
@@ -254,15 +254,15 @@ func TestService_Create_DuplicateEmail(t *testing.T) {
 func TestService_Update_PromotesAndDeletesOldPhoto(t *testing.T) {
 	repo, st, svc := newSvc()
 	id := uuid.New()
-	st.put("users/" + id.String() + "/old.png")
+	st.put("Users/" + id.String() + "/old.png")
 	repo.users[id] = &domain.User{
 		ID: id, Name: "Old", Email: "old@example.com", Password: "x", Role: "user",
-		Photo: "users/" + id.String() + "/old.png",
+		Photo: "Users/" + id.String() + "/old.png",
 	}
-	st.put("temp/users/avatar-new.png")
+	st.put("Temp/Users/avatar-new.png")
 
 	resp, err := svc.Update(context.Background(), id, dto.UpdateUserRequest{
-		Name: "New", Photo: "temp/users/avatar-new.png",
+		Name: "New", Photo: "Temp/Users/avatar-new.png",
 	})
 	if err != nil {
 		t.Fatalf("update: %v", err)
@@ -270,13 +270,13 @@ func TestService_Update_PromotesAndDeletesOldPhoto(t *testing.T) {
 	if resp.Name != "New" {
 		t.Errorf("name = %q", resp.Name)
 	}
-	if !strings.HasPrefix(resp.Photo, "users/") || !strings.HasSuffix(resp.Photo, "avatar-new.png") {
+	if !strings.HasPrefix(resp.Photo, "Users/") || !strings.HasSuffix(resp.Photo, "avatar-new.png") {
 		t.Errorf("photo = %q", resp.Photo)
 	}
-	if st.has("users/" + id.String() + "/old.png") {
+	if st.has("Users/" + id.String() + "/old.png") {
 		t.Error("old photo should be deleted")
 	}
-	if st.has("temp/users/avatar-new.png") {
+	if st.has("Temp/Users/avatar-new.png") {
 		t.Error("temp photo should be moved")
 	}
 }
@@ -285,17 +285,17 @@ func TestService_Update_RollbackPhotoOnDBError(t *testing.T) {
 	repo, st, svc := newSvc()
 	id := uuid.New()
 	repo.users[id] = &domain.User{ID: id, Name: "X", Email: "x@example.com", Password: "p", Role: "user"}
-	st.put("temp/users/avatar-new.png")
+	st.put("Temp/Users/avatar-new.png")
 	repo.updateErr = errors.New("db down")
 
 	_, err := svc.Update(context.Background(), id, dto.UpdateUserRequest{
-		Photo: "temp/users/avatar-new.png",
+		Photo: "Temp/Users/avatar-new.png",
 	})
 	if err == nil {
 		t.Fatal("expected error")
 	}
 	for k := range st.objects {
-		if strings.HasPrefix(k, "users/") {
+		if strings.HasPrefix(k, "Users/") {
 			t.Errorf("promoted object %q should have been rolled back", k)
 		}
 	}
@@ -304,7 +304,7 @@ func TestService_Update_RollbackPhotoOnDBError(t *testing.T) {
 func TestService_DeletePhoto(t *testing.T) {
 	repo, st, svc := newSvc()
 	id := uuid.New()
-	key := "users/" + id.String() + "/x.png"
+	key := "Users/" + id.String() + "/x.png"
 	st.put(key)
 	repo.users[id] = &domain.User{ID: id, Name: "X", Email: "x@example.com", Password: "p", Role: "user", Photo: key}
 

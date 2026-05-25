@@ -14,6 +14,7 @@ type Repository interface {
 	CountByUserSince(userID uuid.UUID, features []string, since time.Time) (int64, error)
 	FindByID(userID, id uuid.UUID) (*domain.AIProcessingLog, error)
 	Create(log *domain.AIProcessingLog) error
+	UpdateImageKey(userID uuid.UUID, oldKey, newKey string) error
 	Delete(userID, id uuid.UUID) error
 	DeleteMany(userID uuid.UUID, ids []uuid.UUID) error
 }
@@ -99,6 +100,16 @@ func (r *repository) Create(log *domain.AIProcessingLog) error {
 		log.ID = uuid.New()
 	}
 	return r.db.Create(log).Error
+}
+
+func (r *repository) UpdateImageKey(userID uuid.UUID, oldKey, newKey string) error {
+	if oldKey == "" || newKey == "" {
+		return nil
+	}
+	return r.db.Model(&domain.AIProcessingLog{}).
+		Where("user_id = ? AND raw_response LIKE ?", userID, "%"+oldKey+"%").
+		Update("raw_response", gorm.Expr("replace(raw_response, ?, ?)", oldKey, newKey)).
+		Error
 }
 
 func (r *repository) Delete(userID, id uuid.UUID) error {

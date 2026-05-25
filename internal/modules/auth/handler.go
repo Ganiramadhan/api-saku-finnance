@@ -11,10 +11,11 @@ import (
 type Handler struct {
 	validator *validator.Validator
 	service   Service
+	turnstile *turnstileVerifier
 }
 
-func NewHandler(s Service, v *validator.Validator) *Handler {
-	return &Handler{service: s, validator: v}
+func NewHandler(s Service, v *validator.Validator, turnstileSecret string) *Handler {
+	return &Handler{service: s, validator: v, turnstile: newTurnstileVerifier(turnstileSecret)}
 }
 
 // Login godoc
@@ -29,6 +30,9 @@ func NewHandler(s Service, v *validator.Validator) *Handler {
 func (h *Handler) Login(c *fiber.Ctx) error {
 	var req dto.LoginRequest
 	if err := httpx.Bind(c, h.validator, &req); err != nil {
+		return err
+	}
+	if err := h.turnstile.Verify(c.Context(), req.TurnstileToken, c.IP()); err != nil {
 		return err
 	}
 	// println("Login attempt for email:", req.Email) // Debug log
@@ -53,6 +57,9 @@ func (h *Handler) Register(c *fiber.Ctx) error {
 	if err := httpx.Bind(c, h.validator, &req); err != nil {
 		return err
 	}
+	if err := h.turnstile.Verify(c.Context(), req.TurnstileToken, c.IP()); err != nil {
+		return err
+	}
 	resp, err := h.service.Register(c.Context(), req)
 	if err != nil {
 		return err
@@ -71,6 +78,9 @@ func (h *Handler) Register(c *fiber.Ctx) error {
 func (h *Handler) ForgotPassword(c *fiber.Ctx) error {
 	var req dto.ForgotPasswordRequest
 	if err := httpx.Bind(c, h.validator, &req); err != nil {
+		return err
+	}
+	if err := h.turnstile.Verify(c.Context(), req.TurnstileToken, c.IP()); err != nil {
 		return err
 	}
 	if err := h.service.ForgotPassword(c.Context(), req); err != nil {

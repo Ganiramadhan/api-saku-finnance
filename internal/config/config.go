@@ -11,16 +11,17 @@ import (
 )
 
 type Config struct {
-	App      AppConfig
-	Database DatabaseConfig
-	Redis    RedisConfig
-	JWT      JWTConfig
-	CORS     CORSConfig
-	S3       S3Config
-	Claude   ClaudeConfig
-	Google   GoogleConfig
-	Midtrans MidtransConfig
-	Mail     MailConfig
+	App       AppConfig
+	Database  DatabaseConfig
+	Redis     RedisConfig
+	JWT       JWTConfig
+	CORS      CORSConfig
+	S3        S3Config
+	Claude    ClaudeConfig
+	Google    GoogleConfig
+	Turnstile TurnstileConfig
+	Midtrans  MidtransConfig
+	Mail      MailConfig
 }
 
 type AppConfig struct {
@@ -73,6 +74,10 @@ type ClaudeConfig struct {
 
 type GoogleConfig struct {
 	ClientID string
+}
+
+type TurnstileConfig struct {
+	SecretKey string
 }
 
 type MidtransConfig struct {
@@ -146,6 +151,9 @@ func Load() *Config {
 		},
 		Google: GoogleConfig{
 			ClientID: os.Getenv("GOOGLE_CLIENT_ID"),
+		},
+		Turnstile: TurnstileConfig{
+			SecretKey: os.Getenv("TURNSTILE_SECRET_KEY"),
 		},
 		Midtrans: MidtransConfig{
 			ServerKey:    os.Getenv("MIDTRANS_SERVER_KEY"),

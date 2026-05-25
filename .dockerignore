@@ -29,9 +29,8 @@ Jenkinsfile
 .DS_Store
 Thumbs.db
 
-# # Secrets — Dockerfile copies envs/ but never the real .env
-# envs/.env
-# .env
+envs/.env
+.env
 
 # Docs / notes (kept out of the build context to shrink it)
 README.md
