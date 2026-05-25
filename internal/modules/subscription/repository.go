@@ -137,9 +137,10 @@ func (r *repository) ListAll(limit, offset int) ([]domain.Subscription, error) {
 	}
 	var rows []domain.Subscription
 	err := r.db.
+		Joins("JOIN users ON users.id = subscriptions.user_id AND users.deleted_at IS NULL").
 		Preload("Plan").
 		Preload("User").
-		Order("created_at DESC").
+		Order("subscriptions.created_at DESC").
 		Limit(limit).
 		Offset(offset).
 		Find(&rows).Error

@@ -1,12 +1,16 @@
 package auth
 
 import (
+	"time"
+
 	"github.com/ganiramadhan/starter-go/internal/constants"
 	"github.com/ganiramadhan/starter-go/internal/dto"
 	"github.com/ganiramadhan/starter-go/pkg/httpx"
 	"github.com/ganiramadhan/starter-go/pkg/validator"
 	"github.com/gofiber/fiber/v2"
 )
+
+const sessionCookieName = "saku_session"
 
 type Handler struct {
 	validator *validator.Validator
@@ -40,6 +44,7 @@ func (h *Handler) Login(c *fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
+	setSessionCookie(c, resp.Token)
 	return httpx.OK(c, constants.MsgLogin, resp)
 }
 
@@ -65,6 +70,30 @@ func (h *Handler) Register(c *fiber.Ctx) error {
 		return err
 	}
 	return httpx.Created(c, constants.MsgRegister, resp)
+}
+
+func (h *Handler) VerifyRegistration(c *fiber.Ctx) error {
+	var req dto.VerifyRegistrationRequest
+	if err := httpx.Bind(c, h.validator, &req); err != nil {
+		return err
+	}
+	resp, err := h.service.VerifyRegistration(c.Context(), req)
+	if err != nil {
+		return err
+	}
+	setSessionCookie(c, resp.Token)
+	return httpx.OK(c, "Account verified successfully.", resp)
+}
+
+func (h *Handler) ResendRegistrationOTP(c *fiber.Ctx) error {
+	var req dto.ResendRegistrationOTPRequest
+	if err := httpx.Bind(c, h.validator, &req); err != nil {
+		return err
+	}
+	if err := h.service.ResendRegistrationOTP(c.Context(), req); err != nil {
+		return err
+	}
+	return httpx.OK(c, "Verification code sent.", nil)
 }
 
 // ForgotPassword godoc
@@ -125,6 +154,11 @@ func (h *Handler) ChangePassword(c *fiber.Ctx) error {
 	return httpx.OK(c, constants.MsgChangePassword, nil)
 }
 
+func (h *Handler) Logout(c *fiber.Ctx) error {
+	clearSessionCookie(c)
+	return httpx.OK(c, "Logged out successfully.", nil)
+}
+
 // GoogleLogin godoc
 // @Summary   Login with Google
 // @Tags      Auth
@@ -143,5 +177,30 @@ func (h *Handler) GoogleLogin(c *fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
+	setSessionCookie(c, resp.Token)
 	return httpx.OK(c, constants.MsgLogin, resp)
+}
+
+func setSessionCookie(c *fiber.Ctx, token string) {
+	c.Cookie(&fiber.Cookie{
+		Name:     sessionCookieName,
+		Value:    token,
+		Path:     "/",
+		MaxAge:   int((24 * time.Hour).Seconds()),
+		HTTPOnly: true,
+		Secure:   c.Protocol() == "https",
+		SameSite: fiber.CookieSameSiteLaxMode,
+	})
+}
+
+func clearSessionCookie(c *fiber.Ctx) {
+	c.Cookie(&fiber.Cookie{
+		Name:     sessionCookieName,
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HTTPOnly: true,
+		Secure:   c.Protocol() == "https",
+		SameSite: fiber.CookieSameSiteLaxMode,
+	})
 }

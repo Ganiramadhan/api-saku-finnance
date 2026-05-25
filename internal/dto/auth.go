@@ -32,9 +32,14 @@ type AuthResponse struct {
 	User  UserResponse `json:"user"`
 }
 
+type RegisterResponse struct {
+	Email     string `json:"email" example:"john@example.com"`
+	ExpiresIn int    `json:"expires_in" example:"300"`
+}
+
 type ChangePasswordRequest struct {
-	CurrentPassword string `json:"current_password" validate:"required" example:"oldSecret123"`
-	NewPassword     string `json:"new_password" validate:"required,min=8,max=72,nefield=CurrentPassword" example:"newSecret123"`
+	CurrentPassword string `json:"current_password,omitempty" validate:"omitempty" example:"oldSecret123"`
+	NewPassword     string `json:"new_password" validate:"required,min=8,max=72" example:"newSecret123"`
 }
 
 type GoogleLoginRequest struct {
@@ -51,6 +56,15 @@ type ResetPasswordRequest struct {
 	Email       string `json:"email" validate:"required,email" example:"john@example.com"`
 	OTP         string `json:"otp" validate:"required,len=6" example:"123456"`
 	NewPassword string `json:"new_password,omitempty" validate:"omitempty,min=8,max=72" example:"newSecret123"`
+}
+
+type VerifyRegistrationRequest struct {
+	Email string `json:"email" validate:"required,email" example:"john@example.com"`
+	OTP   string `json:"otp" validate:"required,len=6" example:"123456"`
+}
+
+type ResendRegistrationOTPRequest struct {
+	Email string `json:"email" validate:"required,email" example:"john@example.com"`
 }
 
 func sanitizeEmailInput(value string) string {

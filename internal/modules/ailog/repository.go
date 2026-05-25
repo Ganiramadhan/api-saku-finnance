@@ -10,6 +10,7 @@ import (
 
 type Repository interface {
 	ListByUser(userID uuid.UUID, feature string, page, limit int) ([]domain.AIProcessingLog, int64, error)
+	ListSavedScanReceipts(userID uuid.UUID, page, limit int) ([]domain.AIProcessingLog, int64, error)
 	ListAll(page, limit int) ([]domain.AIProcessingLog, int64, error)
 	CountByUserSince(userID uuid.UUID, features []string, since time.Time) (int64, error)
 	FindByID(userID, id uuid.UUID) (*domain.AIProcessingLog, error)
@@ -53,6 +54,31 @@ func (r *repository) ListByUser(userID uuid.UUID, feature string, page, limit in
 	}
 	err := q.
 		Preload("User").
+		Order("a_iprocessing_logs.created_at DESC").
+		Limit(limit).
+		Offset((page - 1) * limit).
+		Find(&rows).Error
+	return rows, total, err
+}
+
+func (r *repository) ListSavedScanReceipts(userID uuid.UUID, page, limit int) ([]domain.AIProcessingLog, int64, error) {
+	if page <= 0 {
+		page = 1
+	}
+	if limit <= 0 || limit > 200 {
+		limit = 20
+	}
+	var (
+		rows  []domain.AIProcessingLog
+		total int64
+	)
+	q := r.db.Model(&domain.AIProcessingLog{}).
+		Where("user_id = ? AND feature = ? AND raw_response LIKE ?", userID, "scan_receipt", `%"saved":true%`)
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	err := q.
+		Preload("User").
 		Order("created_at DESC").
 		Limit(limit).
 		Offset((page - 1) * limit).
@@ -71,7 +97,8 @@ func (r *repository) ListAll(page, limit int) ([]domain.AIProcessingLog, int64, 
 		rows  []domain.AIProcessingLog
 		total int64
 	)
-	q := r.db.Model(&domain.AIProcessingLog{})
+	q := r.db.Model(&domain.AIProcessingLog{}).
+		Joins("JOIN users ON users.id = a_iprocessing_logs.user_id AND users.deleted_at IS NULL")
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
@@ -108,7 +135,7 @@ func (r *repository) UpdateImageKey(userID uuid.UUID, oldKey, newKey string) err
 	}
 	return r.db.Model(&domain.AIProcessingLog{}).
 		Where("user_id = ? AND raw_response LIKE ?", userID, "%"+oldKey+"%").
-		Update("raw_response", gorm.Expr("replace(raw_response, ?, ?)", oldKey, newKey)).
+		Update("raw_response", gorm.Expr(`replace(replace(raw_response, ?, ?), '"saved":false', '"saved":true')`, oldKey, newKey)).
 		Error
 }
 

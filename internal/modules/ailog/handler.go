@@ -47,7 +47,17 @@ func (h *Handler) ListChatHistory(c *fiber.Ctx) error {
 }
 
 func (h *Handler) ListScanReceiptHistory(c *fiber.Ctx) error {
-	return h.listFeature(c, "scan_receipt")
+	uid, err := httpx.UserID(c)
+	if err != nil {
+		return err
+	}
+	page := c.QueryInt("page", 1)
+	limit := c.QueryInt("limit", 50)
+	out, meta, err := h.service.ListSavedScanReceipts(c.Context(), uid, page, limit)
+	if err != nil {
+		return err
+	}
+	return httpx.List(c, constants.MsgGetAILogs, out, meta)
 }
 
 func (h *Handler) ListNLPHistory(c *fiber.Ctx) error {

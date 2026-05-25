@@ -13,13 +13,18 @@ import (
 func AuthRequired(j *jwt.Manager) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		header := strings.TrimSpace(c.Get("Authorization"))
+		cookieToken := strings.TrimSpace(c.Cookies("saku_session"))
 		if header == "" {
-			return fiber.NewError(http.StatusUnauthorized, constants.ErrUnauthorized)
-		}
-		if !strings.HasPrefix(header, "Bearer ") {
+			if cookieToken == "" {
+				return fiber.NewError(http.StatusUnauthorized, constants.ErrUnauthorized)
+			}
+		} else if !strings.HasPrefix(header, "Bearer ") {
 			return fiber.NewError(http.StatusUnauthorized, constants.ErrInvalidToken)
 		}
-		token := strings.TrimSpace(strings.TrimPrefix(header, "Bearer "))
+		token := cookieToken
+		if header != "" {
+			token = strings.TrimSpace(strings.TrimPrefix(header, "Bearer "))
+		}
 		if token == "" {
 			return fiber.NewError(http.StatusUnauthorized, constants.ErrInvalidToken)
 		}

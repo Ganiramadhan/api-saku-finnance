@@ -16,6 +16,7 @@ const scanImagePresignTTL = 6 * time.Hour
 
 type Service interface {
 	List(ctx context.Context, userID uuid.UUID, feature string, page, limit int) ([]dto.AIProcessingLogResponse, *dto.PaginationMeta, error)
+	ListSavedScanReceipts(ctx context.Context, userID uuid.UUID, page, limit int) ([]dto.AIProcessingLogResponse, *dto.PaginationMeta, error)
 	ListAll(ctx context.Context, page, limit int) ([]dto.AIProcessingLogResponse, *dto.PaginationMeta, error)
 	CountByUserSince(ctx context.Context, userID uuid.UUID, features []string, since time.Time) (int64, error)
 	Delete(ctx context.Context, userID, id uuid.UUID) error
@@ -91,6 +92,24 @@ func (s *service) List(ctx context.Context, userID uuid.UUID, feature string, pa
 		limit = 20
 	}
 	rows, total, err := s.repo.ListByUser(userID, feature, page, limit)
+	if err != nil {
+		return nil, nil, err
+	}
+	out := make([]dto.AIProcessingLogResponse, 0, len(rows))
+	for _, l := range rows {
+		out = append(out, s.toResp(ctx, l))
+	}
+	return out, dto.NewMeta(page, limit, total), nil
+}
+
+func (s *service) ListSavedScanReceipts(ctx context.Context, userID uuid.UUID, page, limit int) ([]dto.AIProcessingLogResponse, *dto.PaginationMeta, error) {
+	if page <= 0 {
+		page = 1
+	}
+	if limit <= 0 || limit > 200 {
+		limit = 20
+	}
+	rows, total, err := s.repo.ListSavedScanReceipts(userID, page, limit)
 	if err != nil {
 		return nil, nil, err
 	}

@@ -128,9 +128,10 @@ func containsFeature(features []string, feature string) bool {
 }
 
 const systemPrompt = `You are SAKU, an AI assistant for personal finance.
-Always reply in the same language the user used.
+Use the explicitly requested language when the prompt provides one; otherwise reply in the same language the user used.
 When asked for structured data, return ONLY valid JSON without markdown fences.
-Never include commentary outside the JSON object.`
+Never include commentary outside the JSON object.
+Be conservative with money data: never invent amounts, merchants, categories, dates, or line items.`
 
 const chatSystemPrompt = `You are SAKU, a friendly assistant embedded INSIDE the SAKU personal-finance application.
 
@@ -153,12 +154,13 @@ FOLLOW-UPS — IMPORTANT:
 REFUSE ONLY WHEN the user CLEARLY asks for something with no link at all to personal finance or SAKU (e.g. recipes, weather, lyrics, code help, jokes, politics, medical advice, game cheats, translations, general knowledge trivia). In that case reply with EXACTLY ONE short sentence in the user's language, e.g. "Maaf, saya hanya bisa membantu seputar keuangan pribadi dan fitur SAKU." — then STOP. Never tack on extra finance commentary after a refusal.
 
 OUTPUT RULES:
-- Reply in the user's language (Bahasa Indonesia by default).
+- Reply in the required response language provided in the prompt. If none is provided, use English by default.
 - Use Rupiah formatting like "Rp 25.000" when mentioning money.
 - Keep prose answers concise (2-6 short sentences). For list/table/JSON requests, output may be longer — stay accurate.
 - Do not use markdown emphasis like **bold**. Prefer clean professional plain text.
 - If the user seems confused, tell them they can type "help" for guidance.
-- Do NOT invent figures. If a number isn't in the context / previous answer, say you don't have it.`
+- Do NOT invent figures. If a number isn't in the context / previous answer, say you don't have it.
+- If total_transactions is larger than the loaded sample, state which values are exact and which are based on the loaded summary.`
 
 // ─── 1. Categorize from raw text ────────────────────────────────────────────
 
@@ -171,8 +173,15 @@ func (s *service) Categorize(ctx context.Context, userID uuid.UUID, req dto.Cate
 	today := now.Format("2006-01-02")
 	yesterday := now.AddDate(0, 0, -1).Format("2006-01-02")
 	tomorrow := now.AddDate(0, 0, 1).Format("2006-01-02")
+	lang := preferredLanguage(req.Text, req.Language)
+	descriptionLanguage := "English"
+	if lang == "id" {
+		descriptionLanguage = "Bahasa Indonesia"
+	}
 
 	prompt := fmt.Sprintf(`You will receive a free-form Indonesian/English text describing one OR MORE personal finance transactions.
+
+Required output language for the "description" field: %s.
 
 TODAY'S DATE is %s. Interpret relative Indonesian/English dates against this date:
 - "hari ini" / "today" = %s
@@ -224,7 +233,7 @@ Return ONLY this JSON shape (no markdown, no commentary):
     {"amount": number, "merchant_name": string, "category": string, "type": "income"|"expense", "confidence": 0..1, "description": string, "date": "YYYY-MM-DD"}
   ]
 }`,
-		today, today, yesterday, tomorrow, today, strings.Join(cats, ", "), req.Text)
+		descriptionLanguage, today, today, yesterday, tomorrow, today, strings.Join(cats, ", "), req.Text)
 
 	start := time.Now()
 	raw, err := s.claude.AskWithSystem(ctx, systemPrompt, prompt)
@@ -329,8 +338,8 @@ func (s *service) ScanReceipt(ctx context.Context, userID uuid.UUID, req dto.Sca
 		mediaType = "image/jpeg"
 	}
 
-	prompt := fmt.Sprintf(`This image is a receipt or bank/e-wallet transaction screenshot.
-Extract the structured data and pick the best-fitting category from this list (case-insensitive): %s
+	prompt := fmt.Sprintf(`This image is a receipt, invoice, payment proof, bank mutation, or e-wallet transaction screenshot.
+Extract structured data with high precision and pick the best-fitting category from this exact list (case-insensitive): %s
 
 CRITICAL RULES — read carefully BEFORE deciding the type and category:
 
@@ -352,7 +361,8 @@ CRITICAL RULES — read carefully BEFORE deciding the type and category:
      "credited to your account", or it is clearly a payroll/salary slip.
 
 3. "category" rules — VERY IMPORTANT to avoid wrong categorization:
-   - Pick the BEST matching category from the allowed list above.
+   - Pick the BEST matching category from the allowed list above and output it EXACTLY as written.
+   - Never invent a category and never output Uncategorized/Unknown/Other unless that exact category exists in the list.
    - Peer-to-peer bank transfers WITHOUT a clear merchant context should
      be categorized as "Transfer" if available; otherwise pick "Lainnya"
      / "Other" / "Misc". Do NOT default to "Salary" / "Gaji" / "Income".
@@ -364,6 +374,9 @@ CRITICAL RULES — read carefully BEFORE deciding the type and category:
      Indomaret, PLN, Telkom, restaurant brand, etc.).
    - When in doubt, pick the most generic available category — never invent
      a category outside the allowed list.
+   - If the image shows service items (laundry, food, groceries, subscription, bill)
+     and also shows a payment status/transfer method, categorize the underlying service,
+     not the transfer method.
 
 4. "merchant_name" rules:
    - For a transfer OUT (expense): use the RECIPIENT's name / destination
@@ -372,6 +385,9 @@ CRITICAL RULES — read carefully BEFORE deciding the type and category:
    - For a store/merchant receipt: use the merchant/store brand name.
    - NEVER use the user's own name (the sender) as merchant_name on an
      outgoing transfer.
+   - If a receipt has item/service details and a separate payer/payee name,
+     prefer the business/service provider as merchant_name. Do not use a random
+     transfer recipient if it is not the merchant.
 
 5. "amount" must be the numeric total in the receipt's currency. Strip currency
    symbols and thousand separators. Indonesian format "Rp 210.000" = 210000,
@@ -382,10 +398,13 @@ CRITICAL RULES — read carefully BEFORE deciding the type and category:
    so the UI can ask the user to review.
 
 7. Description rules:
-   - For store receipts, describe the purchase naturally, e.g. "Belanja Indomaret: roti, susu".
+   - For store/service receipts, describe the actual goods or service naturally,
+     e.g. "Laundry cuci kering gosok", "Belanja Indomaret: roti, susu".
    - For bank/e-wallet transfer receipts, DO NOT use "belanja" unless it is clearly a merchant payment.
      Use transfer wording, e.g. "Transfer ke BUDI", "Mutasi masuk dari PT ABC",
      "Top up GoPay", or "Pembayaran QRIS ke Merchant".
+   - If line items clearly identify the service, the description must follow those line items
+     rather than a generic transfer label.
 
 8. "line_items" should be informative:
    - For store receipts, include item name, quantity when visible, final price, and discount when visible
@@ -425,6 +444,7 @@ Return ONLY this JSON (no commentary, no markdown fences):
 	if parsed == nil {
 		parsed = map[string]any{}
 	}
+	parsed["saved"] = false
 	if s.storage != nil && req.ImageBase64 != "" {
 		if data, derr := base64.StdEncoding.DecodeString(req.ImageBase64); derr == nil && len(data) > 0 {
 			folder := fmt.Sprintf("Temp/AI/Scans/%s", userID.String())
@@ -706,7 +726,10 @@ func preferredLanguage(message, requested string) string {
 	if englishScore > indonesianScore {
 		return "en"
 	}
-	return "id"
+	if indonesianScore > englishScore {
+		return "id"
+	}
+	return "en"
 }
 
 func localizedChatHelp(lang string) string {

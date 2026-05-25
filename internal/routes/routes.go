@@ -46,6 +46,8 @@ func Register(app *fiber.App, h Handlers, jwtMgr *jwt.Manager) {
 	authPub := v1.Group("/auth")
 	authPub.Post("/login", middleware.LoginRateLimiter(), h.Auth.Login)
 	authPub.Post("/register", middleware.SensitiveRateLimiter(5, time.Minute, 10*time.Minute, "Too many registration attempts. Please try again later."), h.Auth.Register)
+	authPub.Post("/register/verify", middleware.SensitiveRateLimiter(8, time.Minute, 10*time.Minute, "Too many verification attempts. Please try again later."), h.Auth.VerifyRegistration)
+	authPub.Post("/register/resend-otp", middleware.SensitiveRateLimiter(3, time.Minute, 10*time.Minute, "Too many OTP requests. Please try again later."), h.Auth.ResendRegistrationOTP)
 	authPub.Post("/google", middleware.SensitiveRateLimiter(10, time.Minute, 5*time.Minute, "Too many Google login attempts. Please try again later."), h.Auth.GoogleLogin)
 	authPub.Post("/forgot-password", middleware.SensitiveRateLimiter(3, time.Minute, 10*time.Minute, "Too many password reset attempts. Please try again later."), h.Auth.ForgotPassword)
 	authPub.Post("/reset-password", middleware.SensitiveRateLimiter(5, time.Minute, 10*time.Minute, "Too many password reset attempts. Please try again later."), h.Auth.ResetPassword)
@@ -57,11 +59,13 @@ func Register(app *fiber.App, h Handlers, jwtMgr *jwt.Manager) {
 
 	// ---------------- User (authenticated) ----------------
 	authPriv := v1.Group("/auth", authRequired)
+	authPriv.Post("/logout", h.Auth.Logout)
 	authPriv.Post("/change-password", h.Auth.ChangePassword)
 
 	usersMe := v1.Group("/users", authRequired)
 	usersMe.Get("/me", h.User.Me)
 	usersMe.Put("/me", h.User.UpdateMe)
+	usersMe.Delete("/me", h.User.DeleteMe)
 	usersMe.Post("/upload-photo", h.User.UploadPhoto)
 	usersMe.Delete("/me/photo", h.User.DeleteMyPhoto)
 

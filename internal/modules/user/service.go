@@ -215,15 +215,16 @@ func (s *service) DeletePhoto(ctx context.Context, id uuid.UUID) (*dto.UserRespo
 
 func (s *service) toResponse(ctx context.Context, u domain.User) dto.UserResponse {
 	resp := dto.UserResponse{
-		ID:        u.ID,
-		Name:      u.Name,
-		Email:     u.Email,
-		Role:      u.Role,
-		Phone:     u.Phone,
-		Status:    u.Status,
-		Photo:     u.Photo,
-		CreatedAt: u.CreatedAt,
-		UpdatedAt: u.UpdatedAt,
+		ID:           u.ID,
+		Name:         u.Name,
+		Email:        u.Email,
+		Role:         u.Role,
+		AuthProvider: u.AuthProvider,
+		Phone:        u.Phone,
+		Status:       u.Status,
+		Photo:        u.Photo,
+		CreatedAt:    u.CreatedAt,
+		UpdatedAt:    u.UpdatedAt,
 	}
 	if u.Referral != nil {
 		resp.ReferralCode = u.Referral.Code

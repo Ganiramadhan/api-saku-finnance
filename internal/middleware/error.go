@@ -30,10 +30,16 @@ func ErrorHandler(c *fiber.Ctx, err error) error {
 	case errors.Is(err, domain.ErrInvalidCredentials):
 		code = fiber.StatusUnauthorized
 		message = err.Error()
+	case errors.Is(err, domain.ErrAccountNotVerified):
+		code = fiber.StatusForbidden
+		message = err.Error()
 	case errors.Is(err, domain.ErrUnauthorized):
 		code = fiber.StatusUnauthorized
 		message = err.Error()
 	case errors.Is(err, domain.ErrInvalidInput):
+		code = fiber.StatusBadRequest
+		message = err.Error()
+	case errors.Is(err, domain.ErrGmailRequired):
 		code = fiber.StatusBadRequest
 		message = err.Error()
 	case errors.Is(err, domain.ErrInvalidReferral):

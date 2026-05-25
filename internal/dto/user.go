@@ -31,6 +31,7 @@ type UserResponse struct {
 	Name           string    `json:"name" example:"John Doe"`
 	Email          string    `json:"email" example:"john@example.com"`
 	Role           string    `json:"role" example:"user"`
+	AuthProvider   string    `json:"auth_provider,omitempty" example:"password"`
 	Phone          string    `json:"phone,omitempty" example:"+628123456789"`
 	Status         string    `json:"status,omitempty" example:"active"`
 	Photo          string    `json:"photo,omitempty" example:"users/<uuid>/avatar.png"`

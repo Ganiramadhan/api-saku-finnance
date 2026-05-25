@@ -166,9 +166,10 @@ func (a *App) initHTTP() {
 	a.fiber.Use(recover.New())
 	a.fiber.Use(middleware.SecurityHeaders())
 	a.fiber.Use(cors.New(cors.Config{
-		AllowOrigins: a.cfg.CORS.AllowOrigins,
-		AllowMethods: "GET,POST,PUT,DELETE,OPTIONS",
-		AllowHeaders: "Origin,Content-Type,Accept,Authorization,X-Request-ID",
+		AllowOrigins:     a.cfg.CORS.AllowOrigins,
+		AllowMethods:     "GET,POST,PUT,DELETE,OPTIONS",
+		AllowHeaders:     "Origin,Content-Type,Accept,Authorization,X-Request-ID",
+		AllowCredentials: true,
 	}))
 
 	a.fiber.Get("/health", a.healthCheck)
@@ -198,6 +199,7 @@ func (a *App) initHTTP() {
 		FromEmail:  a.cfg.Mail.FromEmail,
 		FromName:   a.cfg.Mail.FromName,
 	})
+	mailClient = mailer.NewAsync(mailClient, 200)
 
 	// Services
 	userSvc := user.NewService(userRepo, a.storage)

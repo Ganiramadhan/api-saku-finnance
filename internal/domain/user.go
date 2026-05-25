@@ -8,17 +8,18 @@ import (
 )
 
 type User struct {
-	ID        uuid.UUID `gorm:"type:uuid;primaryKey"`
-	Name      string    `gorm:"type:varchar(255);not null"`
-	Email     string    `gorm:"type:varchar(255);not null"`
-	Photo     string    `gorm:"type:varchar(500)"`
-	Password  string    `gorm:"type:varchar(255);not null"`
-	Phone     string    `gorm:"type:varchar(32)"`
-	Role      string    `gorm:"type:varchar(50);not null;default:'user'"`
-	Status    string    `gorm:"type:varchar(20);not null;default:'active'"`
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	DeletedAt gorm.DeletedAt `gorm:"index"`
+	ID           uuid.UUID `gorm:"type:uuid;primaryKey"`
+	Name         string    `gorm:"type:varchar(255);not null"`
+	Email        string    `gorm:"type:varchar(255);not null"`
+	Photo        string    `gorm:"type:varchar(500)"`
+	Password     string    `gorm:"type:varchar(255);not null"`
+	AuthProvider string    `gorm:"type:varchar(32);not null;default:'password';index"`
+	Phone        string    `gorm:"type:varchar(32)"`
+	Role         string    `gorm:"type:varchar(50);not null;default:'user'"`
+	Status       string    `gorm:"type:varchar(20);not null;default:'active'"`
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	DeletedAt    gorm.DeletedAt `gorm:"index"`
 
 	OTP      *UserOTP      `gorm:"foreignKey:UserID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
 	Referral *UserReferral `gorm:"foreignKey:UserID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`

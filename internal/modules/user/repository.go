@@ -17,7 +17,10 @@ type Repository interface {
 	Create(u *domain.User) error
 	Update(u *domain.User) error
 	UpsertResetOTP(userID uuid.UUID, codeHash string, expiresAt time.Time) error
+	UpsertOTP(userID uuid.UUID, purpose, codeHash string, expiresAt time.Time) error
+	FindOTP(userID uuid.UUID, purpose string) (*domain.UserOTP, error)
 	ClearResetOTP(userID uuid.UUID) error
+	ClearOTP(userID uuid.UUID, purpose string) error
 	EnsureReferralCode(userID uuid.UUID, code string) (*domain.UserReferral, error)
 	AddReferralReward(id uuid.UUID, amount int64) error
 	Delete(id uuid.UUID) error
@@ -89,21 +92,40 @@ func (r *repository) Create(u *domain.User) error { return r.db.Create(u).Error 
 func (r *repository) Update(u *domain.User) error { return r.db.Save(u).Error }
 
 func (r *repository) UpsertResetOTP(userID uuid.UUID, codeHash string, expiresAt time.Time) error {
+	return r.UpsertOTP(userID, "password_reset", codeHash, expiresAt)
+}
+
+func (r *repository) UpsertOTP(userID uuid.UUID, purpose, codeHash string, expiresAt time.Time) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("user_id = ? AND purpose = ?", userID, "password_reset").Delete(&domain.UserOTP{}).Error; err != nil {
+		if err := tx.Where("user_id = ? AND purpose = ?", userID, purpose).Delete(&domain.UserOTP{}).Error; err != nil {
 			return err
 		}
 		return tx.Create(&domain.UserOTP{
 			UserID:    userID,
-			Purpose:   "password_reset",
+			Purpose:   purpose,
 			CodeHash:  codeHash,
 			ExpiresAt: expiresAt,
 		}).Error
 	})
 }
 
+func (r *repository) FindOTP(userID uuid.UUID, purpose string) (*domain.UserOTP, error) {
+	var otp domain.UserOTP
+	if err := r.db.Where("user_id = ? AND purpose = ?", userID, purpose).First(&otp).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, domain.ErrNotFound
+		}
+		return nil, err
+	}
+	return &otp, nil
+}
+
 func (r *repository) ClearResetOTP(userID uuid.UUID) error {
-	return r.db.Where("user_id = ? AND purpose = ?", userID, "password_reset").Delete(&domain.UserOTP{}).Error
+	return r.ClearOTP(userID, "password_reset")
+}
+
+func (r *repository) ClearOTP(userID uuid.UUID, purpose string) error {
+	return r.db.Where("user_id = ? AND purpose = ?", userID, purpose).Delete(&domain.UserOTP{}).Error
 }
 
 func (r *repository) EnsureReferralCode(userID uuid.UUID, code string) (*domain.UserReferral, error) {
@@ -137,5 +159,12 @@ func (r *repository) AddReferralReward(id uuid.UUID, amount int64) error {
 }
 
 func (r *repository) Delete(id uuid.UUID) error {
-	return r.db.Where("id = ?", id).Delete(&domain.User{}).Error
+	res := r.db.Where("id = ?", id).Delete(&domain.User{})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
 }

@@ -132,6 +132,33 @@ func (h *Handler) DeleteMyPhoto(c *fiber.Ctx) error {
 	return httpx.OK(c, constants.MsgDeleteUserPhoto, u)
 }
 
+// DeleteMe godoc
+// @Summary   Delete my account
+// @Tags      Users
+// @Produce   json
+// @Success   200  {object}  dto.APIResponse
+// @Security  BearerAuth
+// @Router    /api/v1/users/me [delete]
+func (h *Handler) DeleteMe(c *fiber.Ctx) error {
+	uid, err := httpx.UserID(c)
+	if err != nil {
+		return err
+	}
+	if err := h.service.Delete(c.Context(), uid); err != nil {
+		return err
+	}
+	c.Cookie(&fiber.Cookie{
+		Name:     "saku_session",
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HTTPOnly: true,
+		Secure:   c.Protocol() == "https",
+		SameSite: fiber.CookieSameSiteLaxMode,
+	})
+	return httpx.OK(c, constants.MsgDeleteUser, nil)
+}
+
 // List godoc
 // @Summary   List users (admin)
 // @Tags      Users

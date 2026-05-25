@@ -85,20 +85,39 @@ func (r *fakeRepo) Update(u *domain.User) error {
 }
 
 func (r *fakeRepo) UpsertResetOTP(userID uuid.UUID, codeHash string, expiresAt time.Time) error {
+	return r.UpsertOTP(userID, "password_reset", codeHash, expiresAt)
+}
+
+func (r *fakeRepo) UpsertOTP(userID uuid.UUID, purpose, codeHash string, expiresAt time.Time) error {
 	u, ok := r.users[userID]
 	if !ok {
 		return domain.ErrNotFound
 	}
-	u.OTP = &domain.UserOTP{UserID: userID, Purpose: "password_reset", CodeHash: codeHash, ExpiresAt: expiresAt}
+	u.OTP = &domain.UserOTP{UserID: userID, Purpose: purpose, CodeHash: codeHash, ExpiresAt: expiresAt}
 	return nil
 }
 
+func (r *fakeRepo) FindOTP(userID uuid.UUID, purpose string) (*domain.UserOTP, error) {
+	u, ok := r.users[userID]
+	if !ok || u.OTP == nil || u.OTP.Purpose != purpose {
+		return nil, domain.ErrNotFound
+	}
+	copy := *u.OTP
+	return &copy, nil
+}
+
 func (r *fakeRepo) ClearResetOTP(userID uuid.UUID) error {
+	return r.ClearOTP(userID, "password_reset")
+}
+
+func (r *fakeRepo) ClearOTP(userID uuid.UUID, purpose string) error {
 	u, ok := r.users[userID]
 	if !ok {
 		return domain.ErrNotFound
 	}
-	u.OTP = nil
+	if u.OTP != nil && u.OTP.Purpose == purpose {
+		u.OTP = nil
+	}
 	return nil
 }
 
