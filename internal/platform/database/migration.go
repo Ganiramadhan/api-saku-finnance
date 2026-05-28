@@ -46,6 +46,7 @@ func autoMigrate(db *gorm.DB) error {
 
 	return db.AutoMigrate(
 		&domain.User{},
+		&domain.UserPasswordHistory{},
 		&domain.UserOTP{},
 		&domain.UserReferral{},
 		&domain.Wallet{},
@@ -92,6 +93,11 @@ func foreignKeySQL(fk foreignKeySpec) string {
 	DECLARE
 		existing RECORD;
 	BEGIN
+		IF to_regclass(format('%%I.%%I', current_schema(), '%[2]s')) IS NULL
+			OR to_regclass(format('%%I.%%I', current_schema(), '%[4]s')) IS NULL THEN
+			RETURN;
+		END IF;
+
 		IF EXISTS (
 			SELECT 1
 			FROM pg_constraint con
@@ -132,6 +138,7 @@ func foreignKeySQL(fk foreignKeySpec) string {
 
 var foreignKeys = []foreignKeySpec{
 	{Name: "fk_user_otps_user_cascade", Table: "user_otps", Column: "user_id", RefTable: "users", RefColumn: "id", OnUpdate: "CASCADE", OnDelete: "CASCADE"},
+	{Name: "fk_user_password_histories_user_cascade", Table: "user_password_histories", Column: "user_id", RefTable: "users", RefColumn: "id", OnUpdate: "CASCADE", OnDelete: "CASCADE"},
 	{Name: "fk_user_referrals_user_cascade", Table: "user_referrals", Column: "user_id", RefTable: "users", RefColumn: "id", OnUpdate: "CASCADE", OnDelete: "CASCADE"},
 
 	{Name: "fk_wallets_user_cascade", Table: "wallets", Column: "user_id", RefTable: "users", RefColumn: "id", OnUpdate: "CASCADE", OnDelete: "CASCADE"},
@@ -172,6 +179,8 @@ var indexStatements = []string{
 	`CREATE UNIQUE INDEX IF NOT EXISTS idx_user_referrals_user ON user_referrals (user_id)`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS idx_user_otps_user_purpose ON user_otps (user_id, purpose)`,
 	`CREATE INDEX IF NOT EXISTS idx_user_otps_expires_at ON user_otps (expires_at)`,
+	`CREATE INDEX IF NOT EXISTS idx_user_password_histories_user_created
+		ON user_password_histories (user_id, created_at DESC)`,
 
 	`CREATE UNIQUE INDEX IF NOT EXISTS idx_wallets_user_default
 		ON wallets (user_id) WHERE is_default = true AND deleted_at IS NULL`,
@@ -218,6 +227,11 @@ var indexStatements = []string{
 	`CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_user_ref_type
 		ON notifications (user_id, ref_type, ref_id, type)
 		WHERE ref_type <> '' AND ref_id <> ''`,
+
+	`CREATE INDEX IF NOT EXISTS idx_ai_processing_logs_user_feature_created
+		ON ai_processing_logs (user_id, feature, created_at DESC)`,
+	`CREATE INDEX IF NOT EXISTS idx_ai_processing_logs_status
+		ON ai_processing_logs (status)`,
 
 	`CREATE INDEX IF NOT EXISTS idx_subscriptions_user ON subscriptions (user_id)`,
 	`CREATE INDEX IF NOT EXISTS idx_subscriptions_plan ON subscriptions (plan_id)`,

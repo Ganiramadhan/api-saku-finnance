@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/ganiramadhan/starter-go/internal/modules/category"
 	"github.com/ganiramadhan/starter-go/internal/modules/subscription"
 	"github.com/ganiramadhan/starter-go/internal/modules/transaction"
+	"github.com/ganiramadhan/starter-go/internal/modules/wallet"
 	aiplatform "github.com/ganiramadhan/starter-go/internal/platform/ai"
 	"github.com/ganiramadhan/starter-go/internal/platform/storage"
 	"github.com/gofiber/fiber/v2"
@@ -53,6 +55,7 @@ type Service interface {
 type service struct {
 	claude  *aiplatform.Client
 	txns    transaction.Repository
+	wallets wallet.Repository
 	cats    category.Repository
 	logs    ailog.Service
 	storage storage.Storage
@@ -60,7 +63,7 @@ type service struct {
 	subs    subscription.Service
 }
 
-func NewService(claude *aiplatform.Client, txns transaction.Repository, cats category.Repository, logs ailog.Service, store storage.Storage, model string, subs ...subscription.Service) Service {
+func NewService(claude *aiplatform.Client, txns transaction.Repository, wallets wallet.Repository, cats category.Repository, logs ailog.Service, store storage.Storage, model string, subs ...subscription.Service) Service {
 	if model == "" {
 		model = "claude-sonnet-4-5"
 	}
@@ -68,7 +71,7 @@ func NewService(claude *aiplatform.Client, txns transaction.Repository, cats cat
 	if len(subs) > 0 {
 		subSvc = subs[0]
 	}
-	return &service{claude: claude, txns: txns, cats: cats, logs: logs, storage: store, model: model, subs: subSvc}
+	return &service{claude: claude, txns: txns, wallets: wallets, cats: cats, logs: logs, storage: store, model: model, subs: subSvc}
 }
 
 func (s *service) enforceDailyQuota(ctx context.Context, userID uuid.UUID, features []string, limit int, message string) error {
@@ -150,6 +153,13 @@ FOLLOW-UPS — IMPORTANT:
 - If the user asks for JSON or a list/table, output it cleanly (markdown allowed).
   Do NOT refuse just because the request mentions JSON / list / table.
 - NEVER hallucinate transactions. Only mention numbers that appear in the provided context or previous assistant message.
+- Wallet-aware questions are common. If the user mentions a wallet, bank, e-wallet,
+  "cash", "tunai", "dompet", "rekening", or asks remaining balance, use the wallet
+  fields and wallet summaries in context. Do not say wallet data is unavailable when
+  wallet context or transaction rows include wallet names.
+- When the user provides a starting balance ("saldo awal", "modal awal", "awalnya"),
+  calculate remaining balance as starting_balance + income - expense for the matching
+  wallet/period. Explain the formula briefly.
 
 REFUSE ONLY WHEN the user CLEARLY asks for something with no link at all to personal finance or SAKU (e.g. recipes, weather, lyrics, code help, jokes, politics, medical advice, game cheats, translations, general knowledge trivia). In that case reply with EXACTLY ONE short sentence in the user's language, e.g. "Maaf, saya hanya bisa membantu seputar keuangan pribadi dan fitur SAKU." — then STOP. Never tack on extra finance commentary after a refusal.
 
@@ -158,6 +168,8 @@ OUTPUT RULES:
 - Use Rupiah formatting like "Rp 25.000" when mentioning money.
 - Keep prose answers concise (2-6 short sentences). For list/table/JSON requests, output may be longer — stay accurate.
 - Do not use markdown emphasis like **bold**. Prefer clean professional plain text.
+- For calculation questions, be exact and show the core numbers used. If data is
+  partial because only a sample was loaded, say that clearly.
 - If the user seems confused, tell them they can type "help" for guidance.
 - Do NOT invent figures. If a number isn't in the context / previous answer, say you don't have it.
 - If total_transactions is larger than the loaded sample, state which values are exact and which are based on the loaded summary.`
@@ -198,14 +210,20 @@ CATEGORY RULES — critical to avoid "Uncategorized" results:
 - If no perfect match exists, pick the closest generic one from the list
   (e.g. "Lainnya" / "Other" / "Misc" if available; otherwise pick the broadest
   applicable category like "Shopping" / "Food & Beverage").
-- Common mappings: restaurant/cafe/warung/makan → Food & Beverage; grab/gojek/taxi/transport → Transportation;
-  tokopedia/shopee/mall/baju → Shopping; pln/listrik/wifi/internet/pulsa → Bills;
-  bioskop/spotify/netflix → Entertainment; transfer ke teman → Transfer; gaji/salary/payroll → Salary.
+- Common mappings:
+  restaurant/cafe/warung/makan → Makanan & Minuman / Food & Beverage;
+  grab/gojek/taxi/transport/bensin → Transportasi / Transportation;
+  tokopedia/shopee/mall/baju → Belanja / Shopping;
+  pln/listrik/wifi/internet/pulsa/hosting/domain/server/vps/software/subscription → Tagihan / Bills;
+  bioskop/spotify/netflix → Hiburan / Entertainment; transfer ke teman → Transfer; gaji/salary/payroll → Gaji / Salary.
 
 GENERAL RULES:
 1. Detect EVERY distinct transaction in the text. Split on conjunctions like
    ",", ".", "terus", "lalu", "kemudian", "dan", "then", new sentences,
    or whenever a new amount + new item/merchant is mentioned.
+   IMPORTANT: do NOT split a sentence into multiple transactions when one
+   amount covers multiple items at the same merchant, e.g. "kopi dan makanan
+   di Houseplants 52 ribu" is ONE transaction.
 2. Indonesian shorthand amounts:
    - "14rb" / "14 ribu" / "14k" → 14000
    - "121" alone (no rb/ribu/k) in a money context = 121000 ONLY if the
@@ -219,8 +237,18 @@ GENERAL RULES:
    - confidence: 0..1, how sure you are
    - description: a SHORT (max 6 words) summary of THIS transaction only
    - date: transaction date as YYYY-MM-DD, using the relative date rules above
-4. NEVER merge multiple distinct purchases into one transaction.
-5. NEVER invent transactions that are not in the text.
+   - wallet_hint: the funding destination/source phrase if explicitly mentioned
+     for THIS transaction, e.g. "Bank Mandiri", "Self Love Bank Jago",
+     "Dana Darurat Bank Jago", "Savings", "Cash". Empty string if not mentioned.
+     For allocation sentences with several amounts, use the nearest wallet phrase
+     around each amount; do not copy one wallet_hint to every item.
+4. Payment method / wallet phrases are NOT merchant names and should not change
+   the category: "pake/pakai/menggunakan/via cash/tunai/Bank Mandiri/BCA/Jago/
+   dompet Self Love" only describes the funding source.
+5. Handle common typo/noisy user input gracefully, e.g. "menggunkaan" =
+   "menggunakan", "pake" = "pakai", "rb" = "ribu".
+6. NEVER merge multiple distinct purchases into one transaction.
+7. NEVER invent transactions that are not in the text.
 
 Text:
 """
@@ -230,7 +258,7 @@ Text:
 Return ONLY this JSON shape (no markdown, no commentary):
 {
   "transactions": [
-    {"amount": number, "merchant_name": string, "category": string, "type": "income"|"expense", "confidence": 0..1, "description": string, "date": "YYYY-MM-DD"}
+    {"amount": number, "merchant_name": string, "category": string, "type": "income"|"expense", "confidence": 0..1, "description": string, "date": "YYYY-MM-DD", "wallet_hint": string}
   ]
 }`,
 		descriptionLanguage, today, today, yesterday, tomorrow, today, strings.Join(cats, ", "), req.Text)
@@ -250,7 +278,7 @@ Return ONLY this JSON shape (no markdown, no commentary):
 	}
 	parsed["message"] = req.Text
 	parsed["session_id"] = req.SessionID
-	items := extractCategorizeItems(parsed)
+	items := normalizeCategorizeItems(extractCategorizeItems(parsed), cats)
 
 	out := dto.CategorizeResponse{
 		RawResponse:  parsed,
@@ -267,7 +295,7 @@ Return ONLY this JSON shape (no markdown, no commentary):
 	} else {
 		out.Amount = getNumber(parsed, "amount")
 		out.MerchantName = getString(parsed, "merchant_name")
-		out.Category = firstString(parsed, "category", "kategori")
+		out.Category = normalizeCategoryChoice(cats, firstString(parsed, "category", "kategori"))
 		out.Type = normalizeType(getString(parsed, "type"))
 		out.Confidence = getNumber(parsed, "confidence")
 		out.Date = firstString(parsed, "date", "transaction_date")
@@ -316,6 +344,7 @@ func extractCategorizeItems(parsed map[string]any) []dto.CategorizeItem {
 			Confidence:   getNumber(obj, "confidence"),
 			Description:  getString(obj, "description"),
 			Date:         firstString(obj, "date", "transaction_date"),
+			WalletHint:   firstString(obj, "wallet_hint", "wallet", "dompet", "rekening"),
 		}
 		if item.Amount <= 0 && item.MerchantName == "" && item.Category == "" {
 			continue
@@ -326,6 +355,13 @@ func extractCategorizeItems(parsed map[string]any) []dto.CategorizeItem {
 		return nil
 	}
 	return out
+}
+
+func normalizeCategorizeItems(items []dto.CategorizeItem, allowed []string) []dto.CategorizeItem {
+	for i := range items {
+		items[i].Category = normalizeCategoryChoice(allowed, items[i].Category)
+	}
+	return items
 }
 
 func (s *service) ScanReceipt(ctx context.Context, userID uuid.UUID, req dto.ScanReceiptRequest) (dto.ScanReceiptResponse, error) {
@@ -429,7 +465,7 @@ Return ONLY this JSON (no commentary, no markdown fences):
 	out := dto.ScanReceiptResponse{
 		Amount:       getNumber(parsed, "amount"),
 		MerchantName: getString(parsed, "merchant_name"),
-		Category:     firstString(parsed, "category", "kategori"),
+		Category:     normalizeCategoryChoice(cats, firstString(parsed, "category", "kategori")),
 		Type:         normalizeType(getString(parsed, "type")),
 		Currency:     defaultIfEmpty(getString(parsed, "currency"), "IDR"),
 		Date:         getString(parsed, "date"),
@@ -460,11 +496,14 @@ Return ONLY this JSON (no commentary, no markdown fences):
 	}
 
 	s.logLowConfidence(featureScanReceipt, out.Confidence, parsed)
-	s.record(userID, aiLogEntry{
+	logID := s.record(userID, aiLogEntry{
 		Feature: featureScanReceipt, Status: "success", LatencyMs: latency,
 		Confidence: &out.Confidence, Merchant: out.MerchantName, Category: out.Category,
 		Amount: &out.Amount, Raw: parsed,
 	})
+	if logID != uuid.Nil {
+		out.LogID = logID.String()
+	}
 	return out, nil
 }
 
@@ -483,7 +522,17 @@ func (s *service) PromoteScanImage(ctx context.Context, userID uuid.UUID, req dt
 		return dto.PromoteScanImageResponse{}, err
 	}
 	if s.logs != nil {
-		if err := s.logs.PromoteImage(ctx, userID, oldKey, newKey); err != nil {
+		var err error
+		if strings.TrimSpace(req.LogID) != "" {
+			if logID, perr := uuid.Parse(strings.TrimSpace(req.LogID)); perr == nil {
+				err = s.logs.MarkScanSaved(ctx, userID, logID, newKey)
+			} else {
+				err = perr
+			}
+		} else {
+			err = s.logs.PromoteImage(ctx, userID, oldKey, newKey)
+		}
+		if err != nil {
 			slog.Warn("ai: update promoted scan image key failed", "user_id", userID, "error", err)
 		}
 	}
@@ -623,22 +672,85 @@ func (s *service) Chat(ctx context.Context, userID uuid.UUID, req dto.ChatReques
 		s.record(userID, aiLogEntry{Feature: featureChat, Status: "success", LatencyMs: 0, Raw: map[string]any{"message": req.Message, "reply": reply, "refused": true, "session_id": req.SessionID}})
 		return dto.ChatResponse{Reply: reply}, nil
 	}
+	if isTodayExpenseQuestion(req.Message) {
+		now := time.Now()
+		todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+		rows, _, err := s.txns.List(transaction.ListFilter{UserID: userID, From: &todayStart, To: &now, Page: 1, Limit: 200})
+		if err != nil {
+			return dto.ChatResponse{}, err
+		}
+		reply := buildTodayExpenseAnswer(rows, lang, todayStart)
+		s.record(userID, aiLogEntry{Feature: featureChat, Status: "success", LatencyMs: 0, Raw: map[string]any{"message": req.Message, "reply": reply, "session_id": req.SessionID, "deterministic": true}})
+		return dto.ChatResponse{Reply: reply}, nil
+	}
+	if isWalletStartingBalanceQuestion(req.Message) && s.wallets != nil {
+		walletRows, walletErr := s.wallets.List(userID)
+		if walletErr == nil {
+			if matchedWallet := matchWalletFromMessage(req.Message, walletRows); matchedWallet != nil {
+				allRows, totalRows, err := s.txns.List(transaction.ListFilter{
+					UserID: userID, WalletID: &matchedWallet.ID, Page: 1, Limit: 5000,
+				})
+				if err != nil {
+					return dto.ChatResponse{}, err
+				}
+				startingBalance, ok := parseStartingBalance(req.Message)
+				if ok {
+					reply := buildWalletStartingBalanceAnswer(*matchedWallet, allRows, totalRows, startingBalance, lang)
+					s.record(userID, aiLogEntry{Feature: featureChat, Status: "success", LatencyMs: 0, Raw: map[string]any{"message": req.Message, "reply": reply, "session_id": req.SessionID, "deterministic": true, "wallet_id": matchedWallet.ID.String()}})
+					return dto.ChatResponse{Reply: reply}, nil
+				}
+			}
+		}
+	}
 
 	var promptBuilder strings.Builder
 
 	if req.IncludeContext {
 		to := time.Now()
 		from := to.AddDate(0, -1, 0)
+		todayStart := time.Date(to.Year(), to.Month(), to.Day(), 0, 0, 0, 0, to.Location())
+		monthStart := time.Date(to.Year(), to.Month(), 1, 0, 0, 0, 0, to.Location())
 		recentRows, _, err := s.txns.List(transaction.ListFilter{
 			UserID: userID, From: &from, To: &to, Page: 1, Limit: 100,
+		})
+		todayRows, _, todayErr := s.txns.List(transaction.ListFilter{
+			UserID: userID, From: &todayStart, To: &to, Page: 1, Limit: 200,
+		})
+		monthRows, _, monthErr := s.txns.List(transaction.ListFilter{
+			UserID: userID, From: &monthStart, To: &to, Page: 1, Limit: 500,
 		})
 		allRows, totalTransactions, allErr := s.txns.List(transaction.ListFilter{
 			UserID: userID, Page: 1, Limit: 1000,
 		})
+		promptBuilder.WriteString(fmt.Sprintf("Exact date context:\n- today=%s\n- current_month=%s\n", todayStart.Format("2006-01-02"), monthStart.Format("2006-01")))
+		if s.wallets != nil {
+			if walletRows, walletErr := s.wallets.List(userID); walletErr == nil && len(walletRows) > 0 {
+				promptBuilder.WriteString("Wallet context:\n")
+				promptBuilder.WriteString(walletContextString(walletRows))
+				promptBuilder.WriteString("\n")
+			}
+		}
+		if todayErr == nil {
+			income, expense, byCat := summarise(todayRows)
+			promptBuilder.WriteString(fmt.Sprintf("- today_transactions=%d, today_income=%.2f, today_expense=%.2f, today_top_expense_categories=%s\n", len(todayRows), income, expense, topCategoriesString(byCat, 5)))
+			promptBuilder.WriteString(fmt.Sprintf("- today_by_wallet=%s\n", walletSummaryString(todayRows, 8)))
+			if len(todayRows) > 0 {
+				promptBuilder.WriteString("- today_transaction_rows:\n")
+				promptBuilder.WriteString(sampleRowsString(todayRows, 20))
+				promptBuilder.WriteString("\n")
+			}
+		}
+		if monthErr == nil {
+			income, expense, byCat := summarise(monthRows)
+			promptBuilder.WriteString(fmt.Sprintf("- month_transactions=%d, month_income=%.2f, month_expense=%.2f, month_top_expense_categories=%s\n", len(monthRows), income, expense, topCategoriesString(byCat, 5)))
+			promptBuilder.WriteString(fmt.Sprintf("- month_by_wallet=%s\n", walletSummaryString(monthRows, 8)))
+		}
+		promptBuilder.WriteString("- For questions about today/hari ini or this month/bulan ini, use these exact summaries first.\n\n")
 		if allErr == nil && totalTransactions > 0 {
 			income, expense, byCat := summarise(allRows)
 			promptBuilder.WriteString(fmt.Sprintf("All-time transaction context:\n- total_transactions=%d\n- loaded_transactions_for_amount_summary=%d\n- income=%.2f, expense=%.2f\n- top expense categories: %s\n",
 				totalTransactions, len(allRows), income, expense, topCategoriesString(byCat, 5)))
+			promptBuilder.WriteString(fmt.Sprintf("- all_time_by_wallet_loaded=%s\n", walletSummaryString(allRows, 12)))
 			if int64(len(allRows)) < totalTransactions {
 				promptBuilder.WriteString("- Note: total_transactions is exact; income/expense/category summaries are based on loaded_transactions_for_amount_summary only.\n")
 			}
@@ -646,8 +758,8 @@ func (s *service) Chat(ctx context.Context, userID uuid.UUID, req dto.ChatReques
 		}
 		if err == nil && len(recentRows) > 0 {
 			income, expense, byCat := summarise(recentRows)
-			promptBuilder.WriteString(fmt.Sprintf("Context (last 30 days):\n- transaction_count=%d\n- income=%.2f, expense=%.2f\n- top expense categories: %s\n- recent transactions:\n%s\n\n",
-				len(recentRows), income, expense, topCategoriesString(byCat, 5), sampleRowsString(recentRows, 20)))
+			promptBuilder.WriteString(fmt.Sprintf("Context (last 30 days):\n- transaction_count=%d\n- income=%.2f, expense=%.2f\n- top expense categories: %s\n- by_wallet=%s\n- recent transactions:\n%s\n\n",
+				len(recentRows), income, expense, topCategoriesString(byCat, 5), walletSummaryString(recentRows, 8), sampleRowsString(recentRows, 20)))
 		}
 	}
 
@@ -744,6 +856,219 @@ func localizedOffTopic(lang string) string {
 		return "Sorry, I can only help with personal finance and SAKU features. You can ask about spending, budgets, or your transactions."
 	}
 	return "Maaf, saya hanya bisa membantu seputar keuangan pribadi dan fitur SAKU. Boleh tanya soal pengeluaran, anggaran, atau transaksi kamu."
+}
+
+func isTodayExpenseQuestion(message string) bool {
+	text := strings.ToLower(strings.TrimSpace(message))
+	hasExpenseIntent := strings.Contains(text, "pengeluaran") || strings.Contains(text, "expense") || strings.Contains(text, "spending") || strings.Contains(text, "keluar")
+	hasTodayIntent := strings.Contains(text, "hari ini") || strings.Contains(text, "today")
+	return hasExpenseIntent && hasTodayIntent
+}
+
+func buildTodayExpenseAnswer(rows []domain.Transaction, lang string, day time.Time) string {
+	expenses := make([]domain.Transaction, 0, len(rows))
+	total := 0.0
+	byCat := map[string]float64{}
+	for _, row := range rows {
+		if row.Type != "expense" {
+			continue
+		}
+		expenses = append(expenses, row)
+		total += row.Amount
+		byCat[transactionCategoryName(row)] += row.Amount
+	}
+	if len(expenses) == 0 {
+		if lang == "en" {
+			return fmt.Sprintf("You do not have any recorded expenses today (%s).", day.Format("2006-01-02"))
+		}
+		return fmt.Sprintf("Belum ada pengeluaran yang tercatat hari ini (%s).", day.Format("2006-01-02"))
+	}
+	topCategory := topCategoryName(byCat)
+	mainRows := make([]string, 0, minInt(len(expenses), 3))
+	for i := 0; i < len(expenses) && i < 3; i++ {
+		row := expenses[i]
+		name := strings.TrimSpace(row.MerchantName)
+		if name == "" {
+			name = strings.TrimSpace(row.Description)
+		}
+		if name == "" {
+			name = "Transaksi"
+		}
+		mainRows = append(mainRows, fmt.Sprintf("%s (%s)", name, transactionCategoryName(row)))
+	}
+	if lang == "en" {
+		return fmt.Sprintf("Your expenses today (%s) are %s from %d transaction(s). Main category: %s. Transactions: %s.", day.Format("2006-01-02"), formatRupiah(total), len(expenses), topCategory, strings.Join(mainRows, ", "))
+	}
+	return fmt.Sprintf("Pengeluaran kamu hari ini (%s) adalah %s dari %d transaksi. Kategori utama: %s. Transaksi: %s.", day.Format("2006-01-02"), formatRupiah(total), len(expenses), topCategory, strings.Join(mainRows, ", "))
+}
+
+func isWalletStartingBalanceQuestion(message string) bool {
+	text := strings.ToLower(strings.TrimSpace(message))
+	hasWalletIntent := strings.Contains(text, "bank") || strings.Contains(text, "dompet") || strings.Contains(text, "wallet") || strings.Contains(text, "rekening") || strings.Contains(text, "cash") || strings.Contains(text, "tunai")
+	hasStart := strings.Contains(text, "saldo awal") || strings.Contains(text, "awalnya") || strings.Contains(text, "modal awal") || strings.Contains(text, "starting balance") || strings.Contains(text, "initial balance")
+	hasResult := strings.Contains(text, "sisa") || strings.Contains(text, "saldo") || strings.Contains(text, "remaining") || strings.Contains(text, "balance")
+	return hasWalletIntent && hasStart && hasResult
+}
+
+func matchWalletFromMessage(message string, wallets []domain.Wallet) *domain.Wallet {
+	text := normalizeWalletText(message)
+	if text == "" {
+		return nil
+	}
+	textTokens := tokenSet(text)
+	var best *domain.Wallet
+	bestScore := 0
+	for i := range wallets {
+		w := &wallets[i]
+		name := normalizeWalletText(w.Name)
+		if name == "" {
+			continue
+		}
+		score := 0
+		if strings.Contains(text, name) {
+			score += 100
+		}
+		shortName := strings.TrimSpace(walletNoiseRE.ReplaceAllString(name, " "))
+		shortName = strings.Join(strings.Fields(shortName), " ")
+		if shortName != "" && strings.Contains(text, shortName) {
+			score += 80
+		}
+		for _, token := range strings.Fields(shortName) {
+			if len(token) >= 2 && textTokens[token] {
+				score += 14
+			}
+		}
+		if w.Type == domain.WalletTypeCash && (textTokens["cash"] || textTokens["tunai"] || textTokens["kas"]) {
+			score += 90
+		}
+		if score > bestScore {
+			bestScore = score
+			best = w
+		}
+	}
+	if bestScore < 24 {
+		return nil
+	}
+	return best
+}
+
+var walletNoiseRE = regexp.MustCompile(`\b(bank|rekening|akun|account|wallet|dompet|dari|pake|pakai|menggunakan|gunakan|via)\b`)
+
+func normalizeWalletText(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	value = strings.ReplaceAll(value, "&", " ")
+	parts := regexp.MustCompile(`[^a-z0-9]+`).Split(value, -1)
+	return strings.Join(strings.Fields(strings.Join(parts, " ")), " ")
+}
+
+func tokenSet(value string) map[string]bool {
+	out := map[string]bool{}
+	for _, token := range strings.Fields(value) {
+		if len(token) >= 2 {
+			out[token] = true
+		}
+	}
+	return out
+}
+
+var startingBalanceRE = regexp.MustCompile(`(?i)(?:saldo awal(?:nya)?|awalnya|modal awal|starting balance|initial balance)[^\d]*(\d+(?:[.,]\d+)?)\s*(juta|jt|ribu|rb|k|m)?`)
+
+func parseStartingBalance(message string) (float64, bool) {
+	match := startingBalanceRE.FindStringSubmatch(strings.ToLower(message))
+	if len(match) < 2 {
+		return 0, false
+	}
+	raw := strings.ReplaceAll(match[1], ".", "")
+	if strings.Contains(match[1], ",") {
+		raw = strings.ReplaceAll(match[1], ".", "")
+		raw = strings.ReplaceAll(raw, ",", ".")
+	}
+	value, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return 0, false
+	}
+	unit := ""
+	if len(match) > 2 {
+		unit = strings.ToLower(match[2])
+	}
+	switch unit {
+	case "juta", "jt", "m":
+		value *= 1_000_000
+	case "ribu", "rb", "k":
+		value *= 1_000
+	default:
+		if value > 0 && value < 100 {
+			value *= 1_000_000
+		}
+	}
+	return value, true
+}
+
+func buildWalletStartingBalanceAnswer(wallet domain.Wallet, rows []domain.Transaction, totalRows int64, startingBalance float64, lang string) string {
+	income := 0.0
+	expense := 0.0
+	for _, row := range rows {
+		switch row.Type {
+		case domain.TxnTypeIncome:
+			income += row.Amount
+		case domain.TxnTypeExpense:
+			expense += row.Amount
+		}
+	}
+	remaining := startingBalance + income - expense
+	partial := ""
+	if int64(len(rows)) < totalRows {
+		if lang == "en" {
+			partial = fmt.Sprintf(" This uses %d loaded transactions out of %d total for that wallet.", len(rows), totalRows)
+		} else {
+			partial = fmt.Sprintf(" Ini memakai %d transaksi yang termuat dari total %d transaksi di dompet itu.", len(rows), totalRows)
+		}
+	}
+	if lang == "en" {
+		return fmt.Sprintf("For %s, with starting balance %s, income %s, and expenses %s, the remaining balance should be %s. Formula: starting balance + income - expenses.%s", wallet.Name, formatRupiah(startingBalance), formatRupiah(income), formatRupiah(expense), formatRupiah(remaining), partial)
+	}
+	return fmt.Sprintf("Untuk %s, kalau saldo awalnya %s, pemasukan %s, dan pengeluaran %s, maka sisa saldo seharusnya %s. Rumusnya: saldo awal + pemasukan - pengeluaran.%s", wallet.Name, formatRupiah(startingBalance), formatRupiah(income), formatRupiah(expense), formatRupiah(remaining), partial)
+}
+
+func transactionCategoryName(row domain.Transaction) string {
+	if row.Category != nil && strings.TrimSpace(row.Category.Name) != "" {
+		return row.Category.Name
+	}
+	return "Tanpa Kategori"
+}
+
+func topCategoryName(byCat map[string]float64) string {
+	bestName := "Tanpa Kategori"
+	bestAmount := -1.0
+	for name, amount := range byCat {
+		if amount > bestAmount {
+			bestName = name
+			bestAmount = amount
+		}
+	}
+	return bestName
+}
+
+func formatRupiah(amount float64) string {
+	n := int64(amount + 0.5)
+	raw := fmt.Sprintf("%d", n)
+	if len(raw) <= 3 {
+		return "Rp " + raw
+	}
+	parts := []string{}
+	for len(raw) > 3 {
+		parts = append([]string{raw[len(raw)-3:]}, parts...)
+		raw = raw[:len(raw)-3]
+	}
+	parts = append([]string{raw}, parts...)
+	return "Rp " + strings.Join(parts, ".")
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func isHardOffTopic(msg string) bool {
@@ -876,6 +1201,85 @@ func (s *service) resolveCategories(userID uuid.UUID, override []string) []strin
 	return out
 }
 
+func normalizeCategoryChoice(allowed []string, raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return fallbackCategory(allowed)
+	}
+	rawKey := categoryKey(raw)
+	for _, name := range allowed {
+		if categoryKey(name) == rawKey {
+			return name
+		}
+	}
+	aliases := []struct {
+		allowedKeys []string
+		inputKeys   []string
+	}{
+		{[]string{"tagihan", "bills", "bill"}, []string{"bill", "bills", "billing", "utility", "utilities", "subscription", "subscriptions", "hosting", "hostinger", "domain", "server", "vps", "software", "internet", "wifi", "listrik", "pln", "pulsa"}},
+		{[]string{"makananminuman", "foodbeverage", "food"}, []string{"food", "foodbeverage", "restaurant", "restoran", "cafe", "warung", "makan", "minum"}},
+		{[]string{"transportasi", "transportation", "transport"}, []string{"transport", "transportation", "travel", "grab", "gojek", "taxi", "bensin", "parkir"}},
+		{[]string{"belanja", "shopping", "shop"}, []string{"shopping", "shop", "store", "marketplace", "tokopedia", "shopee", "mall"}},
+		{[]string{"hiburan", "entertainment"}, []string{"entertainment", "netflix", "spotify", "movie", "bioskop"}},
+		{[]string{"gaji", "salary"}, []string{"salary", "payroll", "income", "wage"}},
+		{[]string{"investasi", "investment"}, []string{"investment", "investasi"}},
+		{[]string{"lainnya", "other", "misc"}, []string{"other", "misc", "miscellaneous", "uncategorized", "unknown"}},
+	}
+	for _, alias := range aliases {
+		if containsString(alias.allowedKeys, rawKey) || containsString(alias.inputKeys, rawKey) {
+			if match := findAllowedByAnyKey(allowed, alias.allowedKeys); match != "" {
+				return match
+			}
+		}
+	}
+	return fallbackCategory(allowed)
+}
+
+func fallbackCategory(allowed []string) string {
+	for _, key := range []string{"lainnya", "other"} {
+		if match := findAllowedByKey(allowed, key); match != "" {
+			return match
+		}
+	}
+	if len(allowed) > 0 {
+		return allowed[0]
+	}
+	return "Lainnya"
+}
+
+func findAllowedByKey(allowed []string, key string) string {
+	for _, name := range allowed {
+		if categoryKey(name) == key {
+			return name
+		}
+	}
+	return ""
+}
+
+func findAllowedByAnyKey(allowed []string, keys []string) string {
+	for _, key := range keys {
+		if match := findAllowedByKey(allowed, key); match != "" {
+			return match
+		}
+	}
+	return ""
+}
+
+func containsString(values []string, needle string) bool {
+	for _, value := range values {
+		if value == needle {
+			return true
+		}
+	}
+	return false
+}
+
+func categoryKey(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	replacer := strings.NewReplacer("&", "", "and", "", "/", "", "-", "", "_", "", " ", "")
+	return replacer.Replace(value)
+}
+
 type aiLogEntry struct {
 	Feature    string
 	Status     string
@@ -888,9 +1292,9 @@ type aiLogEntry struct {
 	Raw        map[string]any
 }
 
-func (s *service) record(userID uuid.UUID, e aiLogEntry) {
+func (s *service) record(userID uuid.UUID, e aiLogEntry) uuid.UUID {
 	if s.logs == nil {
-		return
+		return uuid.Nil
 	}
 	rawStr := ""
 	if e.Raw != nil {
@@ -912,10 +1316,13 @@ func (s *service) record(userID uuid.UUID, e aiLogEntry) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := s.logs.Record(ctx, userID, req); err != nil {
+	id, err := s.logs.Record(ctx, userID, req)
+	if err != nil {
 		slog.Warn("ai: persist log failed",
 			"feature", e.Feature, "user_id", userID, "error", err)
+		return uuid.Nil
 	}
+	return id
 }
 
 func (s *service) logLowConfidence(feature string, confidence float64, parsed map[string]any) {
@@ -950,11 +1357,7 @@ func summarise(rows []domain.Transaction) (income, expense float64, byCategory m
 			expense += t.Amount
 		}
 		if t.Type == "expense" {
-			key := "Tanpa Kategori"
-			if t.Category != nil && t.Category.Name != "" {
-				key = t.Category.Name
-			}
-			byCategory[key] += t.Amount
+			byCategory[transactionCategoryName(t)] += t.Amount
 		}
 	}
 	return
@@ -980,6 +1383,65 @@ func topCategoriesString(byCat map[string]float64, n int) string {
 	return strings.Join(parts, ", ")
 }
 
+func walletContextString(wallets []domain.Wallet) string {
+	lines := make([]string, 0, len(wallets))
+	for _, w := range wallets {
+		defaultLabel := ""
+		if w.IsDefault {
+			defaultLabel = ", default=true"
+		}
+		lines = append(lines, fmt.Sprintf("- wallet=%q, type=%s, current_balance=%.0f%s", w.Name, w.Type, w.BalanceCached, defaultLabel))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func walletSummaryString(rows []domain.Transaction, n int) string {
+	type summary struct {
+		name    string
+		income  float64
+		expense float64
+		count   int
+	}
+	byWallet := map[string]*summary{}
+	for _, row := range rows {
+		name := "Unknown wallet"
+		if row.Wallet != nil && strings.TrimSpace(row.Wallet.Name) != "" {
+			name = row.Wallet.Name
+		}
+		current := byWallet[name]
+		if current == nil {
+			current = &summary{name: name}
+			byWallet[name] = current
+		}
+		current.count++
+		switch row.Type {
+		case domain.TxnTypeIncome:
+			current.income += row.Amount
+		case domain.TxnTypeExpense:
+			current.expense += row.Amount
+		}
+	}
+	list := make([]*summary, 0, len(byWallet))
+	for _, item := range byWallet {
+		list = append(list, item)
+	}
+	sort.Slice(list, func(i, j int) bool {
+		return list[i].income+list[i].expense > list[j].income+list[j].expense
+	})
+	if n > len(list) {
+		n = len(list)
+	}
+	parts := make([]string, 0, n)
+	for i := 0; i < n; i++ {
+		item := list[i]
+		parts = append(parts, fmt.Sprintf("%s: income=%.0f, expense=%.0f, net=%.0f, count=%d", item.name, item.income, item.expense, item.income-item.expense, item.count))
+	}
+	if len(parts) == 0 {
+		return "-"
+	}
+	return strings.Join(parts, "; ")
+}
+
 func sampleRowsString(rows []domain.Transaction, n int) string {
 	if n > len(rows) {
 		n = len(rows)
@@ -987,16 +1449,16 @@ func sampleRowsString(rows []domain.Transaction, n int) string {
 	lines := make([]string, 0, n)
 	for i := 0; i < n; i++ {
 		t := rows[i]
-		cat := "Tanpa Kategori"
-		if t.Category != nil && t.Category.Name != "" {
-			cat = t.Category.Name
-		}
 		merchant := t.MerchantName
 		if merchant == "" {
 			merchant = t.Description
 		}
-		lines = append(lines, fmt.Sprintf("- %s [%s] %s %.0f (%s)",
-			t.TransactionDate.Format("2006-01-02"), t.Type, cat, t.Amount, merchant))
+		walletName := "Unknown wallet"
+		if t.Wallet != nil && strings.TrimSpace(t.Wallet.Name) != "" {
+			walletName = t.Wallet.Name
+		}
+		lines = append(lines, fmt.Sprintf("- %s [%s] wallet=%q category=%s amount=%.0f merchant_or_desc=%q",
+			t.TransactionDate.Format("2006-01-02"), t.Type, walletName, transactionCategoryName(t), t.Amount, merchant))
 	}
 	return strings.Join(lines, "\n")
 }

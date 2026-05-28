@@ -1,6 +1,8 @@
 package transaction
 
 import (
+	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/ganiramadhan/starter-go/internal/constants"
@@ -127,6 +129,7 @@ func (h *Handler) Update(c *fiber.Ctx) error {
 	if err := httpx.Bind(c, h.validator, &req); err != nil {
 		return err
 	}
+	applyRawUpdateTransactionIDs(c.Body(), &req)
 	out, err := h.service.Update(c.Context(), uid, id, req)
 	if err != nil {
 		return err
@@ -155,6 +158,25 @@ func (h *Handler) Delete(c *fiber.Ctx) error {
 		return err
 	}
 	return httpx.OK(c, constants.MsgDeleteTransaction, nil)
+}
+
+func applyRawUpdateTransactionIDs(body []byte, req *dto.UpdateTransactionRequest) {
+	if len(body) == 0 || req == nil {
+		return
+	}
+	var raw struct {
+		WalletID   *string `json:"wallet_id"`
+		CategoryID *string `json:"category_id"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return
+	}
+	if raw.WalletID != nil {
+		req.WalletID = strings.TrimSpace(*raw.WalletID)
+	}
+	if raw.CategoryID != nil {
+		req.CategoryID = strings.TrimSpace(*raw.CategoryID)
+	}
 }
 
 // Export godoc

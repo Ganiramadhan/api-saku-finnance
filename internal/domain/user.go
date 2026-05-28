@@ -33,6 +33,22 @@ func (u *User) BeforeCreate(_ *gorm.DB) error {
 	return nil
 }
 
+type UserPasswordHistory struct {
+	ID           uuid.UUID `gorm:"type:uuid;primaryKey"`
+	UserID       uuid.UUID `gorm:"type:uuid;not null;index"`
+	PasswordHash string    `gorm:"type:varchar(255);not null"`
+	CreatedAt    time.Time
+
+	User *User `gorm:"foreignKey:UserID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
+}
+
+func (h *UserPasswordHistory) BeforeCreate(_ *gorm.DB) error {
+	if h.ID == uuid.Nil {
+		h.ID = uuid.New()
+	}
+	return nil
+}
+
 type UserOTP struct {
 	ID        uuid.UUID `gorm:"type:uuid;primaryKey"`
 	UserID    uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_user_otps_user_purpose"`

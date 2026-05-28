@@ -16,7 +16,10 @@ import (
 	"github.com/google/uuid"
 )
 
-const referralPaymentReward int64 = 2000
+const (
+	referralPaymentReward int64 = 2000
+	snapPaymentExpiry           = 1 * time.Hour
+)
 
 type Service interface {
 	// Public
@@ -81,6 +84,7 @@ func toSubResp(s domain.Subscription) dto.SubscriptionResponse {
 		Currency:      s.Currency,
 		OrderID:       s.MidtransOrderID,
 		PaymentType:   s.MidtransPaymentType,
+		ExpiresAt:     s.PaymentExpiresAt,
 		StartsAt:      s.StartsAt,
 		EndsAt:        s.EndsAt,
 		PaidAt:        s.PaidAt,
@@ -117,7 +121,27 @@ func (s *service) Checkout(ctx context.Context, userID uuid.UUID, req dto.Checko
 		return nil, fmt.Errorf("plan %q is free and does not require checkout", plan.Code)
 	}
 	if pending, err := s.repo.FindPendingByUserID(userID); err == nil && pending != nil {
-		return nil, fmt.Errorf("you already have a pending payment. Please cancel it before choosing another plan")
+		if s.expirePendingIfNeeded(ctx, pending, time.Now().UTC()) {
+			if err := s.repo.UpdateSubscription(pending); err != nil {
+				return nil, err
+			}
+		} else {
+			if pending.PlanID != plan.ID {
+				return nil, fmt.Errorf("you already have a pending payment. Please cancel it before choosing another plan")
+			}
+			if pending.SnapToken == "" || pending.SnapRedirectURL == "" {
+				return nil, fmt.Errorf("pending payment cannot be resumed. Please cancel it and choose the plan again")
+			}
+			return &dto.CheckoutResponse{
+				SubscriptionID: pending.ID,
+				OrderID:        pending.MidtransOrderID,
+				SnapToken:      pending.SnapToken,
+				RedirectURL:    pending.SnapRedirectURL,
+				ExpiresAt:      pending.PaymentExpiresAt,
+				ClientKey:      s.clientKey,
+				IsProduction:   s.isProd,
+			}, nil
+		}
 	} else if err != nil && !errors.Is(err, domain.ErrNotFound) {
 		return nil, err
 	}
@@ -151,14 +175,17 @@ func (s *service) Checkout(ctx context.Context, userID uuid.UUID, req dto.Checko
 	chargeAmount := int64(plan.Price)
 	itemName := "SAKU " + plan.Name + " (" + plan.Period + ")"
 
+	now := time.Now().UTC()
+	paymentExpiresAt := now.Add(snapPaymentExpiry)
 	sub := &domain.Subscription{
-		UserID:          userID,
-		PlanID:          plan.ID,
-		Status:          domain.SubscriptionStatusPending,
-		Amount:          plan.Price, // record the *full* recurring amount
-		Currency:        plan.Currency,
-		MidtransOrderID: orderID,
-		ReferralCode:    referralCode,
+		UserID:           userID,
+		PlanID:           plan.ID,
+		Status:           domain.SubscriptionStatusPending,
+		Amount:           plan.Price, // record the *full* recurring amount
+		Currency:         plan.Currency,
+		MidtransOrderID:  orderID,
+		PaymentExpiresAt: &paymentExpiresAt,
+		ReferralCode:     referralCode,
 	}
 	if referrer != nil {
 		sub.ReferrerID = &referrer.ID
@@ -188,6 +215,11 @@ func (s *service) Checkout(ctx context.Context, userID uuid.UUID, req dto.Checko
 		"credit_card": map[string]any{
 			"secure": true,
 		},
+		"custom_expiry": map[string]any{
+			"order_time":      now.Format("2006-01-02 15:04:05 -0700"),
+			"expiry_duration": int(snapPaymentExpiry / time.Minute),
+			"unit":            "minute",
+		},
 	}
 
 	snap, err := s.midtrans.CreateSnapTransaction(ctx, payload)
@@ -208,18 +240,26 @@ func (s *service) Checkout(ctx context.Context, userID uuid.UUID, req dto.Checko
 		OrderID:        orderID,
 		SnapToken:      snap.Token,
 		RedirectURL:    snap.RedirectURL,
+		ExpiresAt:      sub.PaymentExpiresAt,
 		ClientKey:      s.clientKey,
 		IsProduction:   s.isProd,
 	}, nil
 }
 
-func (s *service) MySubscriptions(_ context.Context, userID uuid.UUID) ([]dto.SubscriptionResponse, error) {
+func (s *service) MySubscriptions(ctx context.Context, userID uuid.UUID) ([]dto.SubscriptionResponse, error) {
 	rows, err := s.repo.ListByUserID(userID)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]dto.SubscriptionResponse, 0, len(rows))
-	for _, r := range rows {
+	now := time.Now().UTC()
+	for i := range rows {
+		r := rows[i]
+		if s.expirePendingIfNeeded(ctx, &r, now) {
+			if err := s.repo.UpdateSubscription(&r); err != nil {
+				return nil, err
+			}
+		}
 		out = append(out, toSubResp(r))
 	}
 	return out, nil
@@ -264,7 +304,7 @@ func (s *service) ActiveSubscription(_ context.Context, userID uuid.UUID) (*dto.
 	return &r, nil
 }
 
-func (s *service) ConfirmCheckout(_ context.Context, userID uuid.UUID, req dto.ConfirmSubscriptionRequest) (*dto.SubscriptionResponse, error) {
+func (s *service) ConfirmCheckout(ctx context.Context, userID uuid.UUID, req dto.ConfirmSubscriptionRequest) (*dto.SubscriptionResponse, error) {
 	sub, err := s.repo.FindByOrderID(req.OrderID)
 	if err != nil {
 		return nil, err
@@ -272,7 +312,11 @@ func (s *service) ConfirmCheckout(_ context.Context, userID uuid.UUID, req dto.C
 	if sub.UserID != userID {
 		return nil, domain.ErrUnauthorized
 	}
-	if sub.Status == domain.SubscriptionStatusPending && !s.isProd {
+	if s.expirePendingIfNeeded(ctx, sub, time.Now().UTC()) {
+		if err := s.repo.UpdateSubscription(sub); err != nil {
+			return nil, err
+		}
+	} else if sub.Status == domain.SubscriptionStatusPending && !s.isProd {
 		wasActive := sub.Status == domain.SubscriptionStatusActive
 		s.activate(sub)
 		if err := s.repo.UpdateSubscription(sub); err != nil {
@@ -291,13 +335,18 @@ func (s *service) ConfirmCheckout(_ context.Context, userID uuid.UUID, req dto.C
 	return &resp, nil
 }
 
-func (s *service) Cancel(_ context.Context, userID, id uuid.UUID) error {
+func (s *service) Cancel(ctx context.Context, userID, id uuid.UUID) error {
 	sub, err := s.repo.FindByUserID(userID, id)
 	if err != nil {
 		return err
 	}
 	if sub.Status != domain.SubscriptionStatusActive && sub.Status != domain.SubscriptionStatusPending {
 		return fmt.Errorf("subscription cannot be cancelled from status %s", sub.Status)
+	}
+	if sub.Status == domain.SubscriptionStatusPending && s.midtrans != nil && strings.TrimSpace(sub.MidtransOrderID) != "" {
+		if err := s.midtrans.CancelTransaction(ctx, sub.MidtransOrderID); err != nil {
+			log.Printf("subscription: midtrans cancel failed order_id=%s: %v", sub.MidtransOrderID, err)
+		}
 	}
 	sub.Status = domain.SubscriptionStatusCancelled
 	sub.NextBillingAt = nil
@@ -384,6 +433,27 @@ func (s *service) activate(sub *domain.Subscription) {
 	}
 }
 
+func (s *service) expirePendingIfNeeded(ctx context.Context, sub *domain.Subscription, now time.Time) bool {
+	if sub == nil || sub.Status != domain.SubscriptionStatusPending {
+		return false
+	}
+	if sub.PaymentExpiresAt == nil {
+		deadline := sub.CreatedAt.UTC().Add(snapPaymentExpiry)
+		sub.PaymentExpiresAt = &deadline
+	}
+	if now.Before(sub.PaymentExpiresAt.UTC()) {
+		return false
+	}
+	if s.midtrans != nil && strings.TrimSpace(sub.MidtransOrderID) != "" {
+		if err := s.midtrans.CancelTransaction(ctx, sub.MidtransOrderID); err != nil {
+			log.Printf("subscription: midtrans expire cancel failed order_id=%s: %v", sub.MidtransOrderID, err)
+		}
+	}
+	sub.Status = domain.SubscriptionStatusExpired
+	sub.NextBillingAt = nil
+	return true
+}
+
 func (s *service) sendPaymentSuccessEmail(sub *domain.Subscription) {
 	if s.mailer == nil {
 		return
@@ -420,36 +490,18 @@ func paymentSuccessEmailHTML(name, planName, period string, amount float64, curr
 	if endsAt != nil {
 		validUntil = endsAt.Format("02 Jan 2006 15:04 MST")
 	}
-	return fmt.Sprintf(`<!doctype html>
-<html lang="en">
-<body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Arial,sans-serif;color:#0f172a;">
-  <table role="presentation" width="100%%" cellpadding="0" cellspacing="0" border="0" style="background:#f8fafc;">
-    <tr><td align="center" style="padding:28px 16px;">
-      <table role="presentation" width="100%%" cellpadding="0" cellspacing="0" border="0" style="max-width:520px;background:#ffffff;border:1px solid #e2e8f0;border-radius:22px;overflow:hidden;box-shadow:0 16px 40px rgba(15,23,42,.08);">
-        <tr><td style="height:7px;background:#2563eb;line-height:7px;font-size:0;">&nbsp;</td></tr>
-        <tr><td style="padding:24px 26px;">
-          <table role="presentation" width="100%%"><tr>
-            <td><div style="display:inline-block;width:42px;height:42px;border-radius:12px;background:#2563eb;color:#fff;text-align:center;line-height:42px;font-size:20px;font-weight:900;">S</div></td>
-            <td align="right"><span style="display:inline-block;padding:7px 12px;border-radius:999px;background:#eff6ff;border:1px solid #bfdbfe;font-size:10px;font-weight:800;color:#1d4ed8;text-transform:uppercase;letter-spacing:.06em;">Payment confirmed</span></td>
-          </tr></table>
-          <h1 style="margin:22px 0 10px;font-size:20px;font-weight:900;line-height:1.35;color:#0f172a;">Payment received</h1>
-          <p style="margin:0 0 18px;font-size:14px;line-height:1.75;color:#475569;">Hi <strong style="color:#0f172a;">%s</strong>, your SAKU subscription payment has been confirmed.</p>
-          <div style="background:#f8fbff;border:1px solid #dbeafe;border-radius:18px;padding:18px;margin-bottom:16px;">
-            <div style="font-size:12px;color:#64748b;">Plan</div>
-            <div style="font-size:18px;font-weight:900;color:#0f172a;">%s <span style="font-size:12px;color:#2563eb;">%s</span></div>
-            <div style="height:1px;background:#e2e8f0;margin:14px 0;"></div>
-            <div style="font-size:12px;color:#64748b;">Amount</div>
-            <div style="font-size:18px;font-weight:900;color:#0f172a;">%s %.0f</div>
-            <div style="margin-top:12px;font-size:12px;color:#64748b;">Order ID: <strong style="color:#334155;">%s</strong></div>
-            <div style="margin-top:6px;font-size:12px;color:#64748b;">Active until: <strong style="color:#334155;">%s</strong></div>
-          </div>
-          <p style="margin:0;font-size:12px;line-height:1.7;color:#94a3b8;">Thank you for using SAKU. This is an automated email, please do not reply.</p>
-        </td></tr>
-      </table>
-    </td></tr>
-  </table>
-</body>
-</html>`, displayName, planName, period, currency, amount, orderID, validUntil)
+	detail := fmt.Sprintf("Plan: %s %s\nAmount: %s %.0f\nOrder ID: %s\nActive until: %s", planName, period, currency, amount, orderID, validUntil)
+	return mailer.BlueTemplate(mailer.BlueTemplateData{
+		Title:       "Payment Confirmed",
+		Preheader:   "Your SAKU subscription payment has been confirmed.",
+		Badge:       "Subscription",
+		Greeting:    fmt.Sprintf("Hi %s,", displayName),
+		Intro:       "Your SAKU subscription payment has been confirmed. Your Pro access is ready to use.",
+		DetailLabel: "Payment Detail",
+		DetailValue: detail,
+		Warning:     "You can now use Pro features such as AI receipt scanning, Chat with AI, and advanced finance insights.",
+		Footer:      "Thank you for using SAKU. This is an automated email, please do not reply.",
+	})
 }
 
 func sanitizeReferralCode(value string) string {

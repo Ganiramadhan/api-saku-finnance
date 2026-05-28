@@ -54,6 +54,7 @@ type Subscription struct {
 	MidtransPaymentType string     `gorm:"type:varchar(32)"`
 	SnapToken           string     `gorm:"type:varchar(64)"`
 	SnapRedirectURL     string     `gorm:"type:varchar(255)"`
+	PaymentExpiresAt    *time.Time `gorm:"index"`
 	ReferralCode        string     `gorm:"type:varchar(32);index"`
 	ReferralRewardPaid  bool       `gorm:"not null;default:false"`
 	ReferrerID          *uuid.UUID `gorm:"type:uuid;index"`

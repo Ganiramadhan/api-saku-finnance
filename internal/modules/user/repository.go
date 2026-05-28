@@ -21,6 +21,8 @@ type Repository interface {
 	FindOTP(userID uuid.UUID, purpose string) (*domain.UserOTP, error)
 	ClearResetOTP(userID uuid.UUID) error
 	ClearOTP(userID uuid.UUID, purpose string) error
+	ListPasswordHistory(userID uuid.UUID, limit int) ([]domain.UserPasswordHistory, error)
+	AddPasswordHistory(userID uuid.UUID, passwordHash string) error
 	EnsureReferralCode(userID uuid.UUID, code string) (*domain.UserReferral, error)
 	AddReferralReward(id uuid.UUID, amount int64) error
 	Delete(id uuid.UUID) error
@@ -126,6 +128,49 @@ func (r *repository) ClearResetOTP(userID uuid.UUID) error {
 
 func (r *repository) ClearOTP(userID uuid.UUID, purpose string) error {
 	return r.db.Where("user_id = ? AND purpose = ?", userID, purpose).Delete(&domain.UserOTP{}).Error
+}
+
+func (r *repository) ListPasswordHistory(userID uuid.UUID, limit int) ([]domain.UserPasswordHistory, error) {
+	if limit <= 0 {
+		limit = 5
+	}
+	var rows []domain.UserPasswordHistory
+	err := r.db.Where("user_id = ?", userID).
+		Order("created_at DESC").
+		Limit(limit).
+		Find(&rows).Error
+	return rows, err
+}
+
+func (r *repository) AddPasswordHistory(userID uuid.UUID, passwordHash string) error {
+	passwordHash = strings.TrimSpace(passwordHash)
+	if passwordHash == "" {
+		return nil
+	}
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&domain.UserPasswordHistory{
+			UserID:       userID,
+			PasswordHash: passwordHash,
+		}).Error; err != nil {
+			return err
+		}
+
+		var oldRows []domain.UserPasswordHistory
+		if err := tx.Where("user_id = ?", userID).
+			Order("created_at DESC").
+			Offset(5).
+			Find(&oldRows).Error; err != nil {
+			return err
+		}
+		if len(oldRows) == 0 {
+			return nil
+		}
+		ids := make([]uuid.UUID, 0, len(oldRows))
+		for _, row := range oldRows {
+			ids = append(ids, row.ID)
+		}
+		return tx.Delete(&domain.UserPasswordHistory{}, "id IN ?", ids).Error
+	})
 }
 
 func (r *repository) EnsureReferralCode(userID uuid.UUID, code string) (*domain.UserReferral, error) {

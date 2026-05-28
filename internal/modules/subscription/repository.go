@@ -1,6 +1,8 @@
 package subscription
 
 import (
+	"time"
+
 	"github.com/ganiramadhan/starter-go/internal/domain"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -22,6 +24,7 @@ type Repository interface {
 	ListByUserID(userID uuid.UUID) ([]domain.Subscription, error)
 	ListAll(limit, offset int) ([]domain.Subscription, error)
 	ListActiveForReminder() ([]domain.Subscription, error)
+	ExpirePendingBefore(now time.Time) error
 }
 
 func (r *repository) FindByUserID(userID, id uuid.UUID) (*domain.Subscription, error) {
@@ -155,4 +158,15 @@ func (r *repository) ListActiveForReminder() ([]domain.Subscription, error) {
 		Where("status = ?", domain.SubscriptionStatusActive).
 		Find(&rows).Error
 	return rows, err
+}
+
+func (r *repository) ExpirePendingBefore(now time.Time) error {
+	legacyCutoff := now.Add(-snapPaymentExpiry)
+	return r.db.Model(&domain.Subscription{}).
+		Where("status = ?", domain.SubscriptionStatusPending).
+		Where("(payment_expires_at IS NOT NULL AND payment_expires_at <= ?) OR (payment_expires_at IS NULL AND created_at <= ?)", now, legacyCutoff).
+		Updates(map[string]any{
+			"status":          domain.SubscriptionStatusExpired,
+			"next_billing_at": nil,
+		}).Error
 }

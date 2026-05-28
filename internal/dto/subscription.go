@@ -29,12 +29,13 @@ func (r *CheckoutRequest) Sanitize() {
 }
 
 type CheckoutResponse struct {
-	SubscriptionID uuid.UUID `json:"subscription_id"`
-	OrderID        string    `json:"order_id"`
-	SnapToken      string    `json:"snap_token"`
-	RedirectURL    string    `json:"redirect_url"`
-	ClientKey      string    `json:"client_key"`
-	IsProduction   bool      `json:"is_production"`
+	SubscriptionID uuid.UUID  `json:"subscription_id"`
+	OrderID        string     `json:"order_id"`
+	SnapToken      string     `json:"snap_token"`
+	RedirectURL    string     `json:"redirect_url"`
+	ExpiresAt      *time.Time `json:"expires_at,omitempty"`
+	ClientKey      string     `json:"client_key"`
+	IsProduction   bool       `json:"is_production"`
 }
 
 type ConfirmSubscriptionRequest struct {
@@ -51,6 +52,7 @@ type SubscriptionResponse struct {
 	Currency      string     `json:"currency"`
 	OrderID       string     `json:"order_id"`
 	PaymentType   string     `json:"payment_type,omitempty"`
+	ExpiresAt     *time.Time `json:"expires_at,omitempty"`
 	StartsAt      *time.Time `json:"starts_at,omitempty"`
 	EndsAt        *time.Time `json:"ends_at,omitempty"`
 	PaidAt        *time.Time `json:"paid_at,omitempty"`

@@ -16,6 +16,7 @@ type Repository interface {
 	FindByID(userID, id uuid.UUID) (*domain.AIProcessingLog, error)
 	Create(log *domain.AIProcessingLog) error
 	UpdateImageKey(userID uuid.UUID, oldKey, newKey string) error
+	MarkScanSaved(userID, logID uuid.UUID, imageKey string) error
 	Delete(userID, id uuid.UUID) error
 	DeleteMany(userID uuid.UUID, ids []uuid.UUID) error
 }
@@ -54,7 +55,7 @@ func (r *repository) ListByUser(userID uuid.UUID, feature string, page, limit in
 	}
 	err := q.
 		Preload("User").
-		Order("a_iprocessing_logs.created_at DESC").
+		Order("ai_processing_logs.created_at DESC").
 		Limit(limit).
 		Offset((page - 1) * limit).
 		Find(&rows).Error
@@ -73,7 +74,7 @@ func (r *repository) ListSavedScanReceipts(userID uuid.UUID, page, limit int) ([
 		total int64
 	)
 	q := r.db.Model(&domain.AIProcessingLog{}).
-		Where("user_id = ? AND feature = ? AND raw_response::text LIKE ?", userID, "scan_receipt", `%"saved":true%`)
+		Where("user_id = ? AND feature = ? AND raw_response @> ?::jsonb", userID, "scan_receipt", `{"saved": true}`)
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
@@ -98,7 +99,7 @@ func (r *repository) ListAll(page, limit int) ([]domain.AIProcessingLog, int64, 
 		total int64
 	)
 	q := r.db.Model(&domain.AIProcessingLog{}).
-		Joins("JOIN users ON users.id = a_iprocessing_logs.user_id AND users.deleted_at IS NULL")
+		Joins("JOIN users ON users.id = ai_processing_logs.user_id AND users.deleted_at IS NULL")
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
@@ -134,8 +135,22 @@ func (r *repository) UpdateImageKey(userID uuid.UUID, oldKey, newKey string) err
 		return nil
 	}
 	return r.db.Model(&domain.AIProcessingLog{}).
-		Where("user_id = ? AND raw_response LIKE ?", userID, "%"+oldKey+"%").
-		Update("raw_response", gorm.Expr(`replace(replace(raw_response, ?, ?), '"saved":false', '"saved":true')`, oldKey, newKey)).
+		Where("user_id = ? AND raw_response::text LIKE ?", userID, "%"+oldKey+"%").
+		Update("raw_response", gorm.Expr(`jsonb_set(jsonb_set(raw_response, '{image_key}', to_jsonb(?::text), true), '{saved}', 'true'::jsonb, true)`, newKey)).
+		Error
+}
+
+func (r *repository) MarkScanSaved(userID, logID uuid.UUID, imageKey string) error {
+	if logID == uuid.Nil {
+		return nil
+	}
+	rawExpr := gorm.Expr(`jsonb_set(raw_response, '{saved}', 'true'::jsonb, true)`)
+	if imageKey != "" {
+		rawExpr = gorm.Expr(`jsonb_set(jsonb_set(raw_response, '{image_key}', to_jsonb(?::text), true), '{saved}', 'true'::jsonb, true)`, imageKey)
+	}
+	return r.db.Model(&domain.AIProcessingLog{}).
+		Where("id = ? AND user_id = ? AND feature = ?", logID, userID, "scan_receipt").
+		Update("raw_response", rawExpr).
 		Error
 }
 

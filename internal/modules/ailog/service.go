@@ -21,8 +21,9 @@ type Service interface {
 	CountByUserSince(ctx context.Context, userID uuid.UUID, features []string, since time.Time) (int64, error)
 	Delete(ctx context.Context, userID, id uuid.UUID) error
 	DeleteMany(ctx context.Context, userID uuid.UUID, ids []uuid.UUID) error
-	Record(ctx context.Context, userID uuid.UUID, entry RecordInput) error
+	Record(ctx context.Context, userID uuid.UUID, entry RecordInput) (uuid.UUID, error)
 	PromoteImage(ctx context.Context, userID uuid.UUID, oldKey, newKey string) error
+	MarkScanSaved(ctx context.Context, userID, logID uuid.UUID, imageKey string) error
 }
 
 type RecordInput struct {
@@ -186,7 +187,7 @@ func (s *service) DeleteMany(ctx context.Context, userID uuid.UUID, ids []uuid.U
 	return s.repo.DeleteMany(userID, ids)
 }
 
-func (s *service) Record(_ context.Context, userID uuid.UUID, in RecordInput) error {
+func (s *service) Record(_ context.Context, userID uuid.UUID, in RecordInput) (uuid.UUID, error) {
 	rawResponse := in.RawResponse
 	if rawResponse == "" {
 		rawResponse = "{}"
@@ -204,9 +205,16 @@ func (s *service) Record(_ context.Context, userID uuid.UUID, in RecordInput) er
 		ErrorMessage:      in.ErrorMessage,
 		RawResponse:       rawResponse,
 	}
-	return s.repo.Create(&l)
+	if err := s.repo.Create(&l); err != nil {
+		return uuid.Nil, err
+	}
+	return l.ID, nil
 }
 
 func (s *service) PromoteImage(_ context.Context, userID uuid.UUID, oldKey, newKey string) error {
 	return s.repo.UpdateImageKey(userID, oldKey, newKey)
+}
+
+func (s *service) MarkScanSaved(_ context.Context, userID, logID uuid.UUID, imageKey string) error {
+	return s.repo.MarkScanSaved(userID, logID, imageKey)
 }

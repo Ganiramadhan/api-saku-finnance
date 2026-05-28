@@ -96,7 +96,7 @@ func (s *service) Login(_ context.Context, req dto.LoginRequest) (*dto.AuthRespo
 func (s *service) Register(_ context.Context, req dto.RegisterRequest) (*dto.RegisterResponse, error) {
 	name := sanitizeName(req.Name)
 	email := sanitizeEmail(req.Email)
-	if name == "" || email == "" {
+	if name == "" || email == "" || !req.PrivacyAccepted {
 		return nil, domain.ErrInvalidInput
 	}
 	if !isGmailAddress(email) {
@@ -243,8 +243,14 @@ func (s *service) ChangePassword(_ context.Context, userID uuid.UUID, req dto.Ch
 	if err := validateStrongPassword(req.NewPassword); err != nil {
 		return err
 	}
+	if err := s.ensurePasswordNotReused(u, req.NewPassword); err != nil {
+		return err
+	}
 	hashed, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
 	if err != nil {
+		return err
+	}
+	if err := s.users.AddPasswordHistory(u.ID, u.Password); err != nil {
 		return err
 	}
 	u.Password = string(hashed)
@@ -296,93 +302,20 @@ func registrationEmailHTML(name, email, otp string) string {
 		cleanOTP = "------"
 	}
 
-	return fmt.Sprintf(`<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="color-scheme" content="light">
-  <title>Verify SAKU Account</title>
-</head>
-<body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Arial,sans-serif;color:#0f172a;">
-  <div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;color:#f8fafc;line-height:1px;">
-    Your SAKU account verification code is valid for 5 minutes.
-  </div>
-  <table role="presentation" width="100%%" cellpadding="0" cellspacing="0" border="0" style="background:#f8fafc;">
-    <tr>
-      <td align="center" style="padding:28px 16px;">
-        <table role="presentation" width="100%%" cellpadding="0" cellspacing="0" border="0" style="max-width:520px;background:#ffffff;border:1px solid #e2e8f0;border-radius:22px;overflow:hidden;box-shadow:0 16px 40px rgba(15,23,42,.08);">
-          <tr>
-            <td style="height:7px;background:#2563eb;line-height:7px;font-size:0;">&nbsp;</td>
-          </tr>
-          <tr>
-            <td style="padding:24px 26px 0;">
-              <table role="presentation" width="100%%" cellpadding="0" cellspacing="0" border="0">
-                <tr>
-                  <td style="vertical-align:middle;">
-                    <table role="presentation" cellpadding="0" cellspacing="0" border="0">
-                      <tr>
-                        <td style="width:42px;height:42px;border-radius:12px;background:#2563eb;text-align:center;vertical-align:middle;">
-                          <span style="font-size:20px;font-weight:900;line-height:42px;color:#ffffff;">S</span>
-                        </td>
-                        <td style="padding-left:12px;vertical-align:middle;">
-                          <div style="font-size:18px;font-weight:900;color:#0f172a;letter-spacing:.02em;">SAKU</div>
-                          <div style="font-size:10px;font-weight:800;letter-spacing:.12em;color:#2563eb;text-transform:uppercase;">Account Verification</div>
-                        </td>
-                      </tr>
-                    </table>
-                  </td>
-                  <td align="right" style="vertical-align:middle;">
-                    <span style="display:inline-block;padding:7px 12px;border-radius:999px;background:#eff6ff;border:1px solid #bfdbfe;font-size:10px;font-weight:800;color:#1d4ed8;text-transform:uppercase;letter-spacing:.06em;">
-                      Register
-                    </span>
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:24px 26px 26px;">
-              <h1 style="margin:0 0 12px;font-size:20px;font-weight:900;line-height:1.35;color:#0f172a;">Verify your account</h1>
-              <p style="margin:0 0 22px;font-size:14px;line-height:1.75;color:#475569;">
-                Hi <strong style="color:#0f172a;">%s</strong>, use this OTP to complete your SAKU registration.
-              </p>
-              <table role="presentation" width="100%%" cellpadding="0" cellspacing="0" border="0" style="background:#f8fbff;border:1px solid #dbeafe;border-radius:18px;margin-bottom:16px;">
-                <tr>
-                  <td align="center" style="padding:22px;">
-                    <div style="font-size:10px;font-weight:900;letter-spacing:.18em;color:#2563eb;margin-bottom:12px;text-transform:uppercase;">OTP Code</div>
-                    <span style="display:inline-block;padding:13px 24px;border-radius:13px;background:#ffffff;border:1px solid #dbeafe;font-size:32px;letter-spacing:.20em;font-weight:900;color:#1e3a5f;font-family:'Courier New',Courier,monospace;line-height:1;">%s</span>
-                    <div style="margin-top:13px;font-size:12px;font-weight:800;color:#2563eb;">Valid for 5 minutes</div>
-                  </td>
-                </tr>
-              </table>
-              <table role="presentation" width="100%%" cellpadding="0" cellspacing="0" border="0" style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:13px;margin-bottom:14px;">
-                <tr>
-                  <td style="padding:13px;">
-                    <div style="font-size:10px;font-weight:900;color:#15803d;margin-bottom:4px;letter-spacing:.08em;text-transform:uppercase;">Account Email</div>
-                    <div style="font-size:13px;font-weight:800;color:#166534;word-break:break-word;">%s</div>
-                  </td>
-                </tr>
-              </table>
-              <div style="background:#fff7ed;border-left:3px solid #f97316;border-radius:11px;padding:13px;margin-bottom:16px;">
-                <p style="margin:0;font-size:12px;line-height:1.7;color:#9a3412;">
-                  Never share this code. If you did not create a SAKU account, ignore this email.
-                </p>
-              </div>
-              <p style="margin:0;font-size:11px;line-height:1.7;color:#94a3b8;">SAKU will never ask for your OTP through chat, phone, or email.</p>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:15px 18px;border-top:1px solid #eef2f7;text-align:center;background:#ffffff;">
-              <p style="margin:0;font-size:11px;color:#64748b;">&copy; 2026 SAKU Finance &middot; Automated email, please do not reply</p>
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>`, displayName, cleanOTP, accountEmail)
+	return mailer.BlueTemplate(mailer.BlueTemplateData{
+		Title:       "Login Authentication",
+		Preheader:   "Your SAKU verification code is valid for 5 minutes.",
+		Badge:       "Verify Account",
+		Greeting:    fmt.Sprintf("Hi %s,", displayName),
+		Intro:       "Please use the OTP (One-Time Password) below to complete your SAKU account verification.",
+		CodeLabel:   "OTP Code",
+		Code:        cleanOTP,
+		CodeHint:    "This code is valid for 5 minutes.",
+		DetailLabel: "Account Email",
+		DetailValue: accountEmail,
+		Warning:     "Beware of fraud. Do not share this code with anyone. If you did not make this request, please ignore this email.",
+		Footer:      "For further information, please contact SAKU support. This is an automated email, please do not reply.",
+	})
 }
 
 func forgotPasswordEmailHTML(name, email, otp string) string {
@@ -401,154 +334,20 @@ func forgotPasswordEmailHTML(name, email, otp string) string {
 		cleanOTP = "------"
 	}
 
-	return fmt.Sprintf(`<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="color-scheme" content="light">
-  <title>Reset Password SAKU</title>
-  <style>
-    body, table, td, a {
-      -webkit-text-size-adjust:100%%;
-      -ms-text-size-adjust:100%%;
-    }
-
-    body {
-      margin:0;
-      padding:0;
-      width:100%% !important;
-      background:#ffffff;
-      font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Arial,sans-serif;
-    }
-
-    table {
-      border-collapse:separate;
-      mso-table-lspace:0pt;
-      mso-table-rspace:0pt;
-    }
-  </style>
-</head>
-
-<body style="margin:0;padding:0;background:#ffffff;">
-  <div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;color:#ffffff;line-height:1px;">
-    Your SAKU password reset OTP is valid for 10 minutes. Do not share this code with anyone.
-  </div>
-
-  <table role="presentation" width="100%%" cellpadding="0" cellspacing="0" border="0" style="background:#ffffff;">
-    <tr>
-      <td align="center" style="padding:28px 16px;">
-
-        <table role="presentation" width="100%%" cellpadding="0" cellspacing="0" border="0" style="max-width:500px;background:#ffffff;border:1px solid #e5e7eb;border-radius:20px;overflow:hidden;box-shadow:0 6px 20px rgba(15,23,42,.05);">
-
-          <tr>
-            <td style="background:#1d4ed8;padding:20px 24px;">
-              <table role="presentation" width="100%%" cellpadding="0" cellspacing="0" border="0">
-                <tr>
-                  <td style="vertical-align:middle;">
-                    <table role="presentation" cellpadding="0" cellspacing="0" border="0">
-                      <tr>
-                        <td style="width:40px;height:40px;background:#ffffff;border-radius:10px;text-align:center;vertical-align:middle;">
-                          <span style="font-size:18px;font-weight:900;line-height:40px;color:#1d4ed8;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">S</span>
-                        </td>
-                        <td style="padding-left:12px;vertical-align:middle;">
-                          <div style="font-size:17px;font-weight:800;color:#ffffff;letter-spacing:.03em;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">SAKU</div>
-                          <div style="font-size:11px;color:#c7d2fe;letter-spacing:.08em;text-transform:uppercase;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">Account Security</div>
-                        </td>
-                      </tr>
-                    </table>
-                  </td>
-
-                  <td align="right" style="vertical-align:middle;">
-                    <span style="display:inline-block;padding:8px 14px;border-radius:999px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.16);font-size:11px;font-weight:700;color:#ffffff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">
-                      Reset Password
-                    </span>
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
-
-          <tr>
-            <td style="padding:28px;">
-              <h1 style="margin:0 0 12px;font-size:18px;font-weight:800;color:#0f172a;line-height:1.35;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">
-                Verify your identity
-              </h1>
-
-              <p style="margin:0 0 22px;font-size:14px;line-height:1.8;color:#475569;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">
-                Hi <strong style="color:#0f172a;">%s</strong>, we received a password reset request. Use the code below and do not share it with anyone.
-              </p>
-
-              <table role="presentation" width="100%%" cellpadding="0" cellspacing="0" border="0" style="background:#f8fbff;border:1px solid #dbeafe;border-radius:16px;margin-bottom:14px;">
-                <tr>
-                  <td align="center" style="padding:22px;">
-                    <div style="font-size:11px;font-weight:800;letter-spacing:.18em;color:#2563eb;margin-bottom:14px;text-transform:uppercase;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">
-                      OTP Code
-                    </div>
-
-                    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 auto;">
-                      <tr>
-                        <td style="padding:14px 28px;background:#ffffff;border:1px solid #dbeafe;border-radius:12px;text-align:center;">
-                          <span style="font-size:32px;font-weight:900;letter-spacing:.24em;color:#1e3a5f;font-family:'Courier New',Courier,monospace;line-height:1;">
-                            %s
-                          </span>
-                        </td>
-                      </tr>
-                    </table>
-
-                    <div style="margin-top:14px;font-size:13px;font-weight:700;color:#2563eb;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">
-                      Valid for 10 minutes
-                    </div>
-                  </td>
-                </tr>
-              </table>
-
-              <table role="presentation" width="100%%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:14px;">
-                <tr>
-                  <td width="100%%" style="vertical-align:top;">
-                    <table role="presentation" width="100%%" cellpadding="0" cellspacing="0" border="0" style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;">
-                      <tr>
-                        <td style="padding:14px;">
-                          <div style="font-size:10px;font-weight:800;color:#15803d;margin-bottom:4px;letter-spacing:.08em;text-transform:uppercase;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">Your Email</div>
-                          <div style="font-size:13px;font-weight:700;color:#166534;word-break:break-word;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">%s</div>
-                        </td>
-                      </tr>
-                    </table>
-                  </td>
-                </tr>
-              </table>
-
-              <table role="presentation" width="100%%" cellpadding="0" cellspacing="0" border="0" style="background:#fff7ed;border-left:3px solid #f97316;border-radius:10px;margin-bottom:18px;">
-                <tr>
-                  <td style="padding:14px;">
-                    <p style="margin:0;font-size:13px;line-height:1.7;color:#9a3412;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">
-                      <strong>Not you?</strong> Ignore this email and your account will remain safe.
-                    </p>
-                  </td>
-                </tr>
-              </table>
-
-              <p style="margin:0;font-size:12px;line-height:1.7;color:#94a3b8;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">
-                SAKU will never ask for your OTP through chat, phone, or email.
-              </p>
-            </td>
-          </tr>
-
-          <tr>
-            <td style="padding:16px;border-top:1px solid #eef2f7;text-align:center;background:#ffffff;">
-              <p style="margin:0;font-size:11px;color:#64748b;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">
-                &copy; 2026 SAKU &middot; Automated email, please do not reply
-              </p>
-            </td>
-          </tr>
-
-        </table>
-
-      </td>
-    </tr>
-  </table>
-</body>
-</html>`, displayName, cleanOTP, accountEmail)
+	return mailer.BlueTemplate(mailer.BlueTemplateData{
+		Title:       "Reset Password",
+		Preheader:   "Your SAKU password reset OTP is valid for 10 minutes.",
+		Badge:       "Account Security",
+		Greeting:    fmt.Sprintf("Hi %s,", displayName),
+		Intro:       "We received a password reset request for your SAKU account. Please use the OTP below to continue.",
+		CodeLabel:   "OTP Code",
+		Code:        cleanOTP,
+		CodeHint:    "This code is valid for 10 minutes.",
+		DetailLabel: "Account Email",
+		DetailValue: accountEmail,
+		Warning:     "Beware of fraud. Do not share this code with anyone. If you did not request a password reset, ignore this email and your account will remain safe.",
+		Footer:      "For further information, please contact SAKU support. This is an automated email, please do not reply.",
+	})
 }
 
 func (s *service) ResetPassword(_ context.Context, req dto.ResetPasswordRequest) error {
@@ -579,8 +378,14 @@ func (s *service) ResetPassword(_ context.Context, req dto.ResetPasswordRequest)
 	if err := validateStrongPassword(req.NewPassword); err != nil {
 		return err
 	}
+	if err := s.ensurePasswordNotReused(u, req.NewPassword); err != nil {
+		return err
+	}
 	hashed, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
 	if err != nil {
+		return err
+	}
+	if err := s.users.AddPasswordHistory(u.ID, u.Password); err != nil {
 		return err
 	}
 	u.Password = string(hashed)
@@ -592,8 +397,14 @@ func (s *service) ResetPassword(_ context.Context, req dto.ResetPasswordRequest)
 }
 
 func validateStrongPassword(password string) error {
+	if password != strings.TrimSpace(password) {
+		return fmt.Errorf("password baru tidak boleh diawali atau diakhiri spasi")
+	}
 	if len(password) < 8 {
 		return fmt.Errorf("password baru minimal 8 karakter")
+	}
+	if len(password) > 72 {
+		return fmt.Errorf("password baru maksimal 72 karakter")
 	}
 	var hasUpper, hasLower, hasDigit bool
 	for _, r := range password {
@@ -608,6 +419,27 @@ func validateStrongPassword(password string) error {
 	}
 	if !hasUpper || !hasLower || !hasDigit {
 		return fmt.Errorf("password baru harus mengandung huruf besar, huruf kecil, dan angka")
+	}
+	return nil
+}
+
+func (s *service) ensurePasswordNotReused(u *domain.User, password string) error {
+	if strings.TrimSpace(u.Password) != "" {
+		if err := bcrypt.CompareHashAndPassword([]byte(u.Password), []byte(password)); err == nil {
+			return fmt.Errorf("password baru tidak boleh sama dengan password yang pernah digunakan")
+		}
+	}
+	history, err := s.users.ListPasswordHistory(u.ID, 5)
+	if err != nil {
+		return err
+	}
+	for _, item := range history {
+		if strings.TrimSpace(item.PasswordHash) == "" {
+			continue
+		}
+		if err := bcrypt.CompareHashAndPassword([]byte(item.PasswordHash), []byte(password)); err == nil {
+			return fmt.Errorf("password baru tidak boleh sama dengan password yang pernah digunakan")
+		}
 	}
 	return nil
 }
@@ -714,6 +546,7 @@ func authUserResponse(u *domain.User) dto.UserResponse {
 		ID:           u.ID,
 		Name:         u.Name,
 		Email:        u.Email,
+		Phone:        u.Phone,
 		Role:         u.Role,
 		AuthProvider: u.AuthProvider,
 		Photo:        u.Photo,

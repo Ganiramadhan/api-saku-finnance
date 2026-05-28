@@ -19,11 +19,17 @@ import (
 
 type fakeRepo struct {
 	users     map[uuid.UUID]*domain.User
+	history   map[uuid.UUID][]domain.UserPasswordHistory
 	updateErr error
 	createErr error
 }
 
-func newFakeRepo() *fakeRepo { return &fakeRepo{users: map[uuid.UUID]*domain.User{}} }
+func newFakeRepo() *fakeRepo {
+	return &fakeRepo{
+		users:   map[uuid.UUID]*domain.User{},
+		history: map[uuid.UUID][]domain.UserPasswordHistory{},
+	}
+}
 
 func (r *fakeRepo) FindAll(page, limit int, search string) ([]domain.User, int64, error) {
 	out := make([]domain.User, 0, len(r.users))
@@ -117,6 +123,30 @@ func (r *fakeRepo) ClearOTP(userID uuid.UUID, purpose string) error {
 	}
 	if u.OTP != nil && u.OTP.Purpose == purpose {
 		u.OTP = nil
+	}
+	return nil
+}
+
+func (r *fakeRepo) ListPasswordHistory(userID uuid.UUID, limit int) ([]domain.UserPasswordHistory, error) {
+	rows := append([]domain.UserPasswordHistory(nil), r.history[userID]...)
+	if limit > 0 && len(rows) > limit {
+		rows = rows[:limit]
+	}
+	return rows, nil
+}
+
+func (r *fakeRepo) AddPasswordHistory(userID uuid.UUID, passwordHash string) error {
+	if _, ok := r.users[userID]; !ok {
+		return domain.ErrNotFound
+	}
+	r.history[userID] = append([]domain.UserPasswordHistory{{
+		ID:           uuid.New(),
+		UserID:       userID,
+		PasswordHash: passwordHash,
+		CreatedAt:    time.Now(),
+	}}, r.history[userID]...)
+	if len(r.history[userID]) > 5 {
+		r.history[userID] = r.history[userID][:5]
 	}
 	return nil
 }

@@ -26,13 +26,14 @@ func NewAsync(next Mailer, buffer int) Mailer {
 
 func (m *AsyncMailer) Send(to, subject, body string) error {
 	m.jobs <- Message{To: to, Subject: subject, Body: body}
+	log.Printf("mailer broker: queued to=%q subject=%q", to, subject)
 	return nil
 }
 
 func (m *AsyncMailer) worker() {
 	for job := range m.jobs {
 		if err := m.next.Send(job.To, job.Subject, job.Body); err != nil {
-			log.Printf("mailer broker: send failed: %v", err)
+			log.Printf("mailer broker: send failed to=%q subject=%q err=%v", job.To, job.Subject, err)
 		}
 	}
 }

@@ -156,6 +156,10 @@ type AIProcessingLog struct {
 	User *User `gorm:"foreignKey:UserID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
 }
 
+func (AIProcessingLog) TableName() string {
+	return "ai_processing_logs"
+}
+
 func (l *AIProcessingLog) BeforeCreate(_ *gorm.DB) error {
 	if l.ID == uuid.Nil {
 		l.ID = uuid.New()

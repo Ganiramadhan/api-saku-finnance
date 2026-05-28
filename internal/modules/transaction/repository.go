@@ -40,7 +40,7 @@ func (r *repository) DB() *gorm.DB { return r.db }
 func (r *repository) scoped(userID uuid.UUID) *gorm.DB {
 	return r.db.Model(&domain.Transaction{}).
 		Joins("JOIN wallets ON wallets.id = transactions.wallet_id").
-		Where("wallets.user_id = ?", userID)
+		Where("wallets.user_id = ? AND wallets.deleted_at IS NULL", userID)
 }
 
 func (r *repository) List(f ListFilter) ([]domain.Transaction, int64, error) {
@@ -86,6 +86,8 @@ func (r *repository) List(f ListFilter) ([]domain.Transaction, int64, error) {
 
 	var rows []domain.Transaction
 	err := q.
+		Preload("Category").
+		Preload("Wallet").
 		Order("transactions.transaction_date DESC").
 		Limit(limit).Offset(offset).Find(&rows).Error
 	return rows, total, err
@@ -94,6 +96,8 @@ func (r *repository) List(f ListFilter) ([]domain.Transaction, int64, error) {
 func (r *repository) FindByID(userID, id uuid.UUID) (*domain.Transaction, error) {
 	var t domain.Transaction
 	err := r.scoped(userID).
+		Preload("Category").
+		Preload("Wallet").
 		Where("transactions.id = ?", id).
 		First(&t).Error
 	if err != nil {

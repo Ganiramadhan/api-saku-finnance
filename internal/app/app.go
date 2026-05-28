@@ -220,7 +220,7 @@ func (a *App) initHTTP() {
 
 	// AI (Claude)
 	claudeClient := aiplatform.NewClient(a.cfg.Claude.APIKey, a.cfg.Claude.Model)
-	aiSvc := aimodule.NewService(claudeClient, txnRepo, categoryRepo, aiLogSvc, a.storage, a.cfg.Claude.Model, subSvc)
+	aiSvc := aimodule.NewService(claudeClient, txnRepo, walletRepo, categoryRepo, aiLogSvc, a.storage, a.cfg.Claude.Model, subSvc)
 
 	txnHandler := transaction.NewHandler(txnSvc, a.validator)
 	txnHandler.SetExportService(txnExportSvc)
@@ -253,18 +253,30 @@ func (a *App) startReminderJob(
 	ctx, cancel := context.WithCancel(context.Background())
 	a.stopJobs = cancel
 	go func() {
+		a.expirePendingSubscriptions(subRepo)
 		a.runReminderPass(ctx, billingRepo, subRepo, notificationSvc, mailClient)
-		ticker := time.NewTicker(24 * time.Hour)
-		defer ticker.Stop()
+		reminderTicker := time.NewTicker(24 * time.Hour)
+		expiryTicker := time.NewTicker(5 * time.Minute)
+		defer reminderTicker.Stop()
+		defer expiryTicker.Stop()
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case <-ticker.C:
+			case <-expiryTicker.C:
+				a.expirePendingSubscriptions(subRepo)
+			case <-reminderTicker.C:
+				a.expirePendingSubscriptions(subRepo)
 				a.runReminderPass(ctx, billingRepo, subRepo, notificationSvc, mailClient)
 			}
 		}
 	}()
+}
+
+func (a *App) expirePendingSubscriptions(subRepo subscription.Repository) {
+	if err := subRepo.ExpirePendingBefore(time.Now().UTC()); err != nil {
+		log.Printf("subscription cleanup: expire pending subscriptions: %v", err)
+	}
 }
 
 func (a *App) runReminderPass(

@@ -89,8 +89,8 @@ type CreateTransactionRequest struct {
 }
 
 type UpdateTransactionRequest struct {
-	WalletID        *uuid.UUID `json:"wallet_id"`
-	CategoryID      *uuid.UUID `json:"category_id"`
+	WalletID        string     `json:"wallet_id" validate:"omitempty,uuid"`
+	CategoryID      string     `json:"category_id" validate:"omitempty,uuid"`
 	Amount          *float64   `json:"amount" validate:"omitempty,gt=0"`
 	Type            string     `json:"type" validate:"omitempty,oneof=income expense"`
 	Description     *string    `json:"description" validate:"omitempty,max=2000"`
@@ -203,6 +203,7 @@ type CategorizeItem struct {
 	Confidence   float64 `json:"confidence" example:"0.9"`
 	Description  string  `json:"description,omitempty" example:"bubur ayam"`
 	Date         string  `json:"date,omitempty" example:"2026-05-20"`
+	WalletHint   string  `json:"wallet_hint,omitempty" example:"Cash"`
 }
 
 // ScanReceiptRequest accepts a base64-encoded receipt image (JPEG/PNG/WebP).
@@ -225,11 +226,13 @@ type ScanReceiptResponse struct {
 	OCRText      string         `json:"ocr_text,omitempty"`
 	LineItems    []string       `json:"line_items,omitempty"`
 	ImageKey     string         `json:"image_key,omitempty"`
+	LogID        string         `json:"log_id,omitempty"`
 	RawResponse  map[string]any `json:"raw_response,omitempty" swaggertype:"object"`
 }
 
 type PromoteScanImageRequest struct {
 	ImageKey string `json:"image_key" validate:"required" example:"Temp/AI/Scans/<user-id>/<uuid>.webp"`
+	LogID    string `json:"log_id" validate:"omitempty,uuid"`
 }
 
 type PromoteScanImageResponse struct {
