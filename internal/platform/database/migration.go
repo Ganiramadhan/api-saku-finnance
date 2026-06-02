@@ -22,8 +22,20 @@ func Migrate(db *gorm.DB) error {
 		return fmt.Errorf("db is nil")
 	}
 
+	if err := normalizeTelegramChatIDs(db); err != nil {
+		return fmt.Errorf("normalize telegram chat ids: %w", err)
+	}
+
 	if err := autoMigrate(db); err != nil {
 		return fmt.Errorf("auto migrate: %w", err)
+	}
+
+	if err := normalizeSubscriptionPayments(db); err != nil {
+		return fmt.Errorf("normalize subscription payments: %w", err)
+	}
+
+	if err := normalizeTelegramChatIDs(db); err != nil {
+		return fmt.Errorf("normalize telegram chat ids: %w", err)
 	}
 
 	if err := ensureIndexes(db); err != nil {
@@ -35,6 +47,50 @@ func Migrate(db *gorm.DB) error {
 	}
 
 	return nil
+}
+
+func normalizeTelegramChatIDs(db *gorm.DB) error {
+	return db.Exec(`DO $$
+	BEGIN
+		IF EXISTS (
+			SELECT 1 FROM information_schema.columns
+			WHERE table_schema = current_schema()
+				AND table_name = 'users'
+				AND column_name = 'telegram_chat_id'
+		) THEN
+			UPDATE users SET telegram_chat_id = NULL WHERE telegram_chat_id = '';
+		END IF;
+	END $$;`).Error
+}
+
+func normalizeSubscriptionPayments(db *gorm.DB) error {
+	return db.Exec(`DO $$
+	BEGIN
+		IF EXISTS (
+			SELECT 1 FROM information_schema.columns
+			WHERE table_schema = current_schema()
+				AND table_name = 'subscriptions'
+				AND column_name = 'payment_status'
+		) THEN
+			UPDATE subscriptions
+			SET payment_status = CASE
+				WHEN status = 'active' THEN 'paid'
+				WHEN status = 'expired' THEN 'expired'
+				WHEN status = 'cancelled' THEN 'cancelled'
+				WHEN status = 'failed' THEN 'failed'
+				ELSE 'pending'
+			END
+			WHERE payment_status IS NULL OR payment_status = '';
+
+			UPDATE subscriptions
+			SET original_amount = amount
+			WHERE original_amount IS NULL OR original_amount = 0;
+
+			UPDATE subscriptions
+			SET payment_created_at = created_at
+			WHERE payment_created_at IS NULL;
+		END IF;
+	END $$;`).Error
 }
 
 func autoMigrate(db *gorm.DB) error {
@@ -63,6 +119,9 @@ func autoMigrate(db *gorm.DB) error {
 		&domain.UpcomingBilling{},
 		&domain.Plan{},
 		&domain.Subscription{},
+		&domain.SubscriptionPayment{},
+		&domain.SubscriptionPaymentEvent{},
+		&domain.Voucher{},
 		&domain.Notification{},
 		&domain.SplitBill{},
 		&domain.SplitBillParticipant{},

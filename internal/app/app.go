@@ -24,6 +24,7 @@ import (
 	"github.com/ganiramadhan/starter-go/internal/modules/splitbill"
 	"github.com/ganiramadhan/starter-go/internal/modules/subscription"
 	"github.com/ganiramadhan/starter-go/internal/modules/support"
+	"github.com/ganiramadhan/starter-go/internal/modules/telegram"
 	"github.com/ganiramadhan/starter-go/internal/modules/transaction"
 	"github.com/ganiramadhan/starter-go/internal/modules/upcomingbilling"
 	"github.com/ganiramadhan/starter-go/internal/modules/user"
@@ -224,6 +225,7 @@ func (a *App) initHTTP() {
 	// AI (Claude)
 	claudeClient := aiplatform.NewClient(a.cfg.Claude.APIKey, a.cfg.Claude.Model)
 	aiSvc := aimodule.NewService(claudeClient, txnRepo, walletRepo, categoryRepo, aiLogSvc, a.storage, a.cfg.Claude.Model, subSvc)
+	telegramSvc := telegram.NewService(userRepo, walletRepo, categoryRepo, txnSvc, aiSvc, telegram.NewHTTPClient(a.cfg.Telegram.BotToken))
 
 	txnHandler := transaction.NewHandler(txnSvc, a.validator)
 	txnHandler.SetExportService(txnExportSvc)
@@ -242,6 +244,7 @@ func (a *App) initHTTP() {
 		Billing:      upcomingbilling.NewHandler(billingSvc, a.validator),
 		AI:           aimodule.NewHandler(aiSvc, a.validator),
 		Notification: notification.NewHandler(notificationSvc, a.validator),
+		Telegram:     telegram.NewHandler(telegramSvc, a.validator, a.cfg.Telegram.WebhookSecret),
 	}.WithSupport(support.NewHandler(supportSvc, a.storage, a.validator))
 	routes.Register(a.fiber, handlers, jwtMgr)
 
@@ -344,19 +347,29 @@ func (a *App) runReminderPass(
 		if due == nil {
 			continue
 		}
-		window := 7
-		if sub.Plan.Period == domain.PlanPeriodYearly {
-			window = 30
-		}
-		if daysUntilUTC(today, *due) != window {
+		daysLeft := daysUntilUTC(today, *due)
+		if daysLeft == 7 {
+			title := "Your SAKU subscription ends in 7 days"
+			message := fmt.Sprintf("Your %s subscription is active until %s. Renew or prepare payment so your Pro features stay available.", sub.Plan.Name, due.Format("02 Jan 2006"))
+			_ = notificationSvc.Create(ctx, domain.Notification{
+				UserID: sub.UserID, Type: "subscription_expiring_soon", Title: title, Message: message, RefType: "subscription", RefID: sub.ID.String(),
+			})
+			_ = mailClient.Send(sub.User.Email, title, message+"\n\nOpen SAKU to manage your subscription.")
 			continue
 		}
-		title := fmt.Sprintf("Subscription reminder in %d days", window)
-		message := fmt.Sprintf("Your %s subscription renews on %s for %s.", sub.Plan.Name, due.Format("02 Jan 2006"), formatMoney(sub.Amount, sub.Currency))
-		_ = notificationSvc.Create(ctx, domain.Notification{
-			UserID: sub.UserID, Type: "subscription_reminder", Title: title, Message: message, RefType: "subscription", RefID: sub.ID.String(),
-		})
-		_ = mailClient.Send(sub.User.Email, title, message+"\n\nOpen SAKU to manage your subscription.")
+		if daysLeft == 0 {
+			title := "Your SAKU subscription has ended"
+			message := fmt.Sprintf("Your %s subscription period ended on %s. Create a new invoice to continue using Pro features.", sub.Plan.Name, due.Format("02 Jan 2006"))
+			_ = notificationSvc.Create(ctx, domain.Notification{
+				UserID: sub.UserID, Type: "subscription_ended", Title: title, Message: message, RefType: "subscription", RefID: sub.ID.String(),
+			})
+			_ = mailClient.Send(sub.User.Email, title, message+"\n\nOpen SAKU to renew your subscription.")
+			sub.Status = domain.SubscriptionStatusExpired
+			sub.NextBillingAt = nil
+			if err := subRepo.UpdateSubscription(&sub); err != nil {
+				log.Printf("reminder: expire subscription %s: %v", sub.ID, err)
+			}
+		}
 	}
 }
 

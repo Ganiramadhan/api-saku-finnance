@@ -59,6 +59,16 @@ func (r *fakeRepo) FindByEmail(email string) (*domain.User, error) {
 	return nil, domain.ErrNotFound
 }
 
+func (r *fakeRepo) FindByTelegramChatID(chatID string) (*domain.User, error) {
+	for _, u := range r.users {
+		if u.TelegramChatID != nil && *u.TelegramChatID == chatID {
+			copy := *u
+			return &copy, nil
+		}
+	}
+	return nil, domain.ErrNotFound
+}
+
 func (r *fakeRepo) FindByReferralCode(code string) (*domain.User, error) {
 	for _, u := range r.users {
 		if u.Referral != nil && u.Referral.Code == strings.ToUpper(strings.TrimSpace(code)) {
@@ -171,6 +181,24 @@ func (r *fakeRepo) AddReferralReward(id uuid.UUID, amount int64) error {
 		u.Referral = &domain.UserReferral{UserID: id}
 	}
 	u.Referral.Reward += amount
+	return nil
+}
+
+func (r *fakeRepo) BindTelegramChatID(userID uuid.UUID, chatID string) error {
+	u, ok := r.users[userID]
+	if !ok {
+		return domain.ErrNotFound
+	}
+	u.TelegramChatID = &chatID
+	return nil
+}
+
+func (r *fakeRepo) DisconnectTelegram(userID uuid.UUID) error {
+	u, ok := r.users[userID]
+	if !ok {
+		return domain.ErrNotFound
+	}
+	u.TelegramChatID = nil
 	return nil
 }
 
@@ -399,5 +427,44 @@ func TestService_List_DefaultsAndSearch(t *testing.T) {
 	}
 	if meta.Page != 1 || meta.Limit != 10 {
 		t.Errorf("defaults wrong: page=%d limit=%d", meta.Page, meta.Limit)
+	}
+}
+
+func TestService_BindTelegram_ValidatesChatID(t *testing.T) {
+	_, _, svc := newSvc()
+	id := uuid.New()
+
+	if _, err := svc.BindTelegram(context.Background(), id, dto.BindTelegramRequest{ChatID: "abc"}); err == nil {
+		t.Fatal("expected invalid chat id error")
+	}
+	if _, err := svc.BindTelegram(context.Background(), id, dto.BindTelegramRequest{ChatID: "1234"}); err == nil {
+		t.Fatal("expected too-short chat id error")
+	}
+}
+
+func TestService_BindTelegram_SavesValidChatID(t *testing.T) {
+	repo, _, svc := newSvc()
+	id := uuid.New()
+	repo.users[id] = &domain.User{ID: id, Name: "User", Email: "u@example.com", Role: "user", Password: "x"}
+
+	resp, err := svc.BindTelegram(context.Background(), id, dto.BindTelegramRequest{ChatID: "123456789"})
+	if err != nil {
+		t.Fatalf("bind telegram: %v", err)
+	}
+	if resp.TelegramChatID != "123456789" {
+		t.Fatalf("telegram_chat_id = %q", resp.TelegramChatID)
+	}
+}
+
+func TestService_BindTelegram_RejectsUsedChatID(t *testing.T) {
+	repo, _, svc := newSvc()
+	id := uuid.New()
+	otherID := uuid.New()
+	chatID := "123456789"
+	repo.users[id] = &domain.User{ID: id, Name: "User", Email: "u@example.com", Role: "user", Password: "x"}
+	repo.users[otherID] = &domain.User{ID: otherID, Name: "Other", Email: "o@example.com", Role: "user", Password: "x", TelegramChatID: &chatID}
+
+	if _, err := svc.BindTelegram(context.Background(), id, dto.BindTelegramRequest{ChatID: chatID}); err == nil {
+		t.Fatal("expected duplicate chat id error")
 	}
 }

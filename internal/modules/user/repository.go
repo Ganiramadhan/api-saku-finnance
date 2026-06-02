@@ -13,6 +13,7 @@ type Repository interface {
 	FindAll(page, limit int, search string) ([]domain.User, int64, error)
 	FindByID(id uuid.UUID) (*domain.User, error)
 	FindByEmail(email string) (*domain.User, error)
+	FindByTelegramChatID(chatID string) (*domain.User, error)
 	FindByReferralCode(code string) (*domain.User, error)
 	Create(u *domain.User) error
 	Update(u *domain.User) error
@@ -25,6 +26,8 @@ type Repository interface {
 	AddPasswordHistory(userID uuid.UUID, passwordHash string) error
 	EnsureReferralCode(userID uuid.UUID, code string) (*domain.UserReferral, error)
 	AddReferralReward(id uuid.UUID, amount int64) error
+	BindTelegramChatID(userID uuid.UUID, chatID string) error
+	DisconnectTelegram(userID uuid.UUID) error
 	Delete(id uuid.UUID) error
 }
 
@@ -66,6 +69,21 @@ func (r *repository) FindByID(id uuid.UUID) (*domain.User, error) {
 func (r *repository) FindByEmail(email string) (*domain.User, error) {
 	var u domain.User
 	if err := r.db.Preload("OTP").Preload("Referral").Where("email = ?", email).First(&u).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, domain.ErrNotFound
+		}
+		return nil, err
+	}
+	return &u, nil
+}
+
+func (r *repository) FindByTelegramChatID(chatID string) (*domain.User, error) {
+	chatID = strings.TrimSpace(chatID)
+	if chatID == "" {
+		return nil, domain.ErrNotFound
+	}
+	var u domain.User
+	if err := r.db.Preload("Referral").Where("telegram_chat_id = ?", chatID).First(&u).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return nil, domain.ErrNotFound
 		}
@@ -201,6 +219,22 @@ func (r *repository) AddReferralReward(id uuid.UUID, amount int64) error {
 		Where("user_id = ?", id).
 		UpdateColumn("reward", gorm.Expr("reward + ?", amount)).
 		Error
+}
+
+func (r *repository) BindTelegramChatID(userID uuid.UUID, chatID string) error {
+	chatID = strings.TrimSpace(chatID)
+	if chatID == "" {
+		return domain.ErrInvalidInput
+	}
+	return r.db.Model(&domain.User{}).
+		Where("id = ?", userID).
+		Update("telegram_chat_id", chatID).Error
+}
+
+func (r *repository) DisconnectTelegram(userID uuid.UUID) error {
+	return r.db.Model(&domain.User{}).
+		Where("id = ?", userID).
+		Update("telegram_chat_id", nil).Error
 }
 
 func (r *repository) Delete(id uuid.UUID) error {

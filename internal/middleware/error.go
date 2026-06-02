@@ -48,6 +48,9 @@ func ErrorHandler(c *fiber.Ctx, err error) error {
 	case errors.Is(err, domain.ErrInvalidReferral):
 		code = fiber.StatusBadRequest
 		message = err.Error()
+	case errors.Is(err, domain.ErrInvalidVoucher):
+		code = fiber.StatusBadRequest
+		message = strings.TrimPrefix(err.Error(), domain.ErrInvalidVoucher.Error()+": ")
 	case errors.Is(err, domain.ErrInvalidOTP):
 		code = fiber.StatusBadRequest
 		message = err.Error()

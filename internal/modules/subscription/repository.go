@@ -14,6 +14,14 @@ type Repository interface {
 	FindPlanByCode(code string) (*domain.Plan, error)
 	FindPlanByID(id uuid.UUID) (*domain.Plan, error)
 
+	// Vouchers
+	ListVouchers(limit, offset int) ([]domain.Voucher, error)
+	FindVoucherByID(id uuid.UUID) (*domain.Voucher, error)
+	FindVoucherByCode(code string) (*domain.Voucher, error)
+	CreateVoucher(v *domain.Voucher) error
+	UpdateVoucher(v *domain.Voucher) error
+	DeleteVoucher(id uuid.UUID) error
+
 	// Subscriptions
 	CreateSubscription(s *domain.Subscription) error
 	UpdateSubscription(s *domain.Subscription) error
@@ -25,6 +33,13 @@ type Repository interface {
 	ListAll(limit, offset int) ([]domain.Subscription, error)
 	ListActiveForReminder() ([]domain.Subscription, error)
 	ExpirePendingBefore(now time.Time) error
+
+	// Subscription payments
+	CreatePayment(p *domain.SubscriptionPayment) error
+	UpdatePayment(p *domain.SubscriptionPayment) error
+	FindPaymentByOrderID(orderID string) (*domain.SubscriptionPayment, error)
+	CreatePaymentEvent(e *domain.SubscriptionPaymentEvent) error
+	IncrementVoucherUsage(code string) error
 }
 
 func (r *repository) FindByUserID(userID, id uuid.UUID) (*domain.Subscription, error) {
@@ -68,6 +83,49 @@ func (r *repository) FindPlanByID(id uuid.UUID) (*domain.Plan, error) {
 		return nil, err
 	}
 	return &p, nil
+}
+
+func (r *repository) ListVouchers(limit, offset int) ([]domain.Voucher, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	var rows []domain.Voucher
+	err := r.db.Order("created_at DESC").Limit(limit).Offset(offset).Find(&rows).Error
+	return rows, err
+}
+
+func (r *repository) FindVoucherByID(id uuid.UUID) (*domain.Voucher, error) {
+	var v domain.Voucher
+	if err := r.db.Where("id = ?", id).First(&v).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, domain.ErrNotFound
+		}
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r *repository) FindVoucherByCode(code string) (*domain.Voucher, error) {
+	var v domain.Voucher
+	if err := r.db.Where("code = ?", code).First(&v).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, domain.ErrNotFound
+		}
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r *repository) CreateVoucher(v *domain.Voucher) error {
+	return r.db.Create(v).Error
+}
+
+func (r *repository) UpdateVoucher(v *domain.Voucher) error {
+	return r.db.Save(v).Error
+}
+
+func (r *repository) DeleteVoucher(id uuid.UUID) error {
+	return r.db.Delete(&domain.Voucher{}, "id = ?", id).Error
 }
 
 func (r *repository) CreateSubscription(s *domain.Subscription) error {
@@ -161,12 +219,42 @@ func (r *repository) ListActiveForReminder() ([]domain.Subscription, error) {
 }
 
 func (r *repository) ExpirePendingBefore(now time.Time) error {
-	legacyCutoff := now.Add(-snapPaymentExpiry)
+	legacyCutoff := now.Add(-snapPageExpiry)
 	return r.db.Model(&domain.Subscription{}).
-		Where("status = ?", domain.SubscriptionStatusPending).
+		Where("status = ? AND payment_status = ?", domain.SubscriptionStatusPending, domain.PaymentStatusPending).
 		Where("(payment_expires_at IS NOT NULL AND payment_expires_at <= ?) OR (payment_expires_at IS NULL AND created_at <= ?)", now, legacyCutoff).
 		Updates(map[string]any{
-			"status":          domain.SubscriptionStatusExpired,
-			"next_billing_at": nil,
+			"payment_status":     domain.PaymentStatusExpired,
+			"payment_expired_at": now,
+			"next_billing_at":    nil,
 		}).Error
+}
+
+func (r *repository) CreatePayment(p *domain.SubscriptionPayment) error {
+	return r.db.Create(p).Error
+}
+
+func (r *repository) UpdatePayment(p *domain.SubscriptionPayment) error {
+	return r.db.Save(p).Error
+}
+
+func (r *repository) FindPaymentByOrderID(orderID string) (*domain.SubscriptionPayment, error) {
+	var p domain.SubscriptionPayment
+	if err := r.db.Preload("Subscription").Where("order_id = ?", orderID).First(&p).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, domain.ErrNotFound
+		}
+		return nil, err
+	}
+	return &p, nil
+}
+
+func (r *repository) CreatePaymentEvent(e *domain.SubscriptionPaymentEvent) error {
+	return r.db.Create(e).Error
+}
+
+func (r *repository) IncrementVoucherUsage(code string) error {
+	return r.db.Model(&domain.Voucher{}).
+		Where("code = ?", code).
+		UpdateColumn("used_count", gorm.Expr("used_count + 1")).Error
 }

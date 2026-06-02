@@ -14,6 +14,7 @@ import (
 	"github.com/ganiramadhan/starter-go/internal/modules/splitbill"
 	"github.com/ganiramadhan/starter-go/internal/modules/subscription"
 	"github.com/ganiramadhan/starter-go/internal/modules/support"
+	"github.com/ganiramadhan/starter-go/internal/modules/telegram"
 	"github.com/ganiramadhan/starter-go/internal/modules/transaction"
 	"github.com/ganiramadhan/starter-go/internal/modules/upcomingbilling"
 	"github.com/ganiramadhan/starter-go/internal/modules/user"
@@ -37,6 +38,7 @@ type Handlers struct {
 	AI           *ai.Handler
 	Notification *notification.Handler
 	Support      *support.Handler
+	Telegram     *telegram.Handler
 }
 
 func (h Handlers) WithSupport(s *support.Handler) Handlers {
@@ -64,6 +66,11 @@ func Register(app *fiber.App, h Handlers, jwtMgr *jwt.Manager) {
 	subsPub.Get("/plans", h.Subscription.ListPlans)
 	subsPub.Post("/webhook", h.Subscription.Webhook)
 
+	if h.Telegram != nil {
+		telegramPub := v1.Group("/telegram")
+		telegramPub.Post("/webhook/:secret", h.Telegram.Webhook)
+	}
+
 	// ---------------- User (authenticated) ----------------
 	authPriv := v1.Group("/auth", authRequired)
 	authPriv.Post("/logout", h.Auth.Logout)
@@ -72,6 +79,8 @@ func Register(app *fiber.App, h Handlers, jwtMgr *jwt.Manager) {
 	usersMe := v1.Group("/users", authRequired)
 	usersMe.Get("/me", h.User.Me)
 	usersMe.Put("/me", h.User.UpdateMe)
+	usersMe.Post("/me/telegram", h.User.BindTelegram)
+	usersMe.Delete("/me/telegram", h.User.DisconnectTelegram)
 	usersMe.Delete("/me", h.User.DeleteMe)
 	usersMe.Post("/upload-photo", h.User.UploadPhoto)
 	usersMe.Delete("/me/photo", h.User.DeleteMyPhoto)
@@ -145,17 +154,21 @@ func Register(app *fiber.App, h Handlers, jwtMgr *jwt.Manager) {
 	subs.Get("/me", h.Subscription.MySubscriptions)
 	subs.Get("/me/active", h.Subscription.ActiveSubscription)
 	subs.Post("/checkout", middleware.SensitiveRateLimiter(6, time.Minute, 5*time.Minute, "Too many checkout attempts. Please try again later."), h.Subscription.Checkout)
+	subs.Post("/voucher/validate", middleware.SensitiveRateLimiter(12, time.Minute, 5*time.Minute, "Too many voucher attempts. Please try again later."), h.Subscription.ValidateVoucher)
 	subs.Post("/confirm", middleware.SensitiveRateLimiter(10, time.Minute, 5*time.Minute, "Too many payment confirmation attempts. Please try again later."), h.Subscription.ConfirmCheckout)
+	subs.Post("/:id/renew-invoice", middleware.SensitiveRateLimiter(6, time.Minute, 5*time.Minute, "Too many invoice attempts. Please try again later."), h.Subscription.RenewInvoice)
 	subs.Post("/:id/cancel", h.Subscription.Cancel)
 
 	// AI categorization
 	aiGroup := v1.Group("/ai", authRequired)
-	aiGroup.Post("/categorize", h.AI.Categorize)
-	aiGroup.Post("/scan-receipt", h.AI.ScanReceipt)
+	aiTextLimiter := middleware.SensitiveRateLimiter(30, time.Minute, 2*time.Minute, "Too many AI requests. Please wait a moment before trying again.")
+	aiVisionLimiter := middleware.SensitiveRateLimiter(12, time.Minute, 5*time.Minute, "Too many receipt scan requests. Please wait a moment before trying again.")
+	aiGroup.Post("/categorize", aiTextLimiter, h.AI.Categorize)
+	aiGroup.Post("/scan-receipt", aiVisionLimiter, h.AI.ScanReceipt)
 	aiGroup.Post("/scan-receipt/promote-image", h.AI.PromoteScanImage)
-	aiGroup.Post("/insights", h.AI.Insights)
-	aiGroup.Post("/suggest-budget", h.AI.SuggestBudget)
-	aiGroup.Post("/chat", h.AI.Chat)
+	aiGroup.Post("/insights", aiTextLimiter, h.AI.Insights)
+	aiGroup.Post("/suggest-budget", aiTextLimiter, h.AI.SuggestBudget)
+	aiGroup.Post("/chat", aiTextLimiter, h.AI.Chat)
 	aiGroup.Get("/chat-history", h.AILog.ListChatHistory)
 	aiGroup.Get("/nlp-history", h.AILog.ListNLPHistory)
 	aiGroup.Get("/scan-receipt-history", h.AILog.ListScanReceiptHistory)
@@ -179,6 +192,10 @@ func Register(app *fiber.App, h Handlers, jwtMgr *jwt.Manager) {
 	adminUsers.Put("/:id", h.User.Update)
 	adminUsers.Delete("/:id", h.User.Delete)
 	admin.Get("/subscriptions", h.Subscription.ListAllAdmin)
+	admin.Get("/vouchers", h.Subscription.ListVouchersAdmin)
+	admin.Post("/vouchers", h.Subscription.CreateVoucherAdmin)
+	admin.Put("/vouchers/:id", h.Subscription.UpdateVoucherAdmin)
+	admin.Delete("/vouchers/:id", h.Subscription.DeleteVoucherAdmin)
 	admin.Get("/support-tickets", h.Support.List)
 	admin.Post("/support-tickets/attachments", h.Support.UploadAttachment)
 	admin.Post("/support-tickets/:id/reply", h.Support.Reply)

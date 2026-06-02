@@ -22,6 +22,7 @@ type Config struct {
 	Turnstile TurnstileConfig
 	Midtrans  MidtransConfig
 	Mail      MailConfig
+	Telegram  TelegramConfig
 }
 
 type AppConfig struct {
@@ -97,6 +98,11 @@ type MailConfig struct {
 	FromName   string
 }
 
+type TelegramConfig struct {
+	BotToken      string
+	WebhookSecret string
+}
+
 func Load() *Config {
 	loadEnvFile()
 
@@ -169,6 +175,10 @@ func Load() *Config {
 			Encryption: getEnvOrDefault("MAIL_ENCRYPTION", "tls"),
 			FromEmail:  os.Getenv("MAIL_FROM_ADDRESS"),
 			FromName:   getEnvOrDefault("MAIL_FROM_NAME", "SAKU"),
+		},
+		Telegram: TelegramConfig{
+			BotToken:      os.Getenv("TELEGRAM_BOT_TOKEN"),
+			WebhookSecret: os.Getenv("TELEGRAM_WEBHOOK_SECRET"),
 		},
 	}
 }

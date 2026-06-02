@@ -26,6 +26,10 @@ type UpdateUserRequest struct {
 	Photo    string `json:"photo,omitempty" example:"temp/users/avatar-1a2b3c4d.png"`
 }
 
+type BindTelegramRequest struct {
+	ChatID string `json:"chat_id" validate:"required,max=64" example:"123456789"`
+}
+
 type UserResponse struct {
 	ID             uuid.UUID  `json:"id" example:"550e8400-e29b-41d4-a716-446655440000"`
 	Name           string     `json:"name" example:"John Doe"`
@@ -38,6 +42,7 @@ type UserResponse struct {
 	PhotoURL       string     `json:"photo_url,omitempty" example:"https://minio.local/starter/users/<uuid>/avatar.png?X-Amz-..."`
 	ReferralCode   string     `json:"referral_code,omitempty" example:"SAKU1A2B3C4D"`
 	ReferralReward int64      `json:"referral_reward,omitempty" example:"2000"`
+	TelegramChatID string     `json:"telegram_chat_id,omitempty" example:"123456789"`
 	LastLoginAt    *time.Time `json:"last_login_at,omitempty"`
 	CreatedAt      time.Time  `json:"created_at,omitempty"`
 	UpdatedAt      time.Time  `json:"updated_at,omitempty"`

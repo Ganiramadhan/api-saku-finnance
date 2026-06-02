@@ -50,6 +50,16 @@ type SnapResponse struct {
 	RedirectURL string `json:"redirect_url"`
 }
 
+type TransactionStatusResponse struct {
+	OrderID           string `json:"order_id"`
+	StatusCode        string `json:"status_code"`
+	GrossAmount       string `json:"gross_amount"`
+	TransactionStatus string `json:"transaction_status"`
+	FraudStatus       string `json:"fraud_status"`
+	PaymentType       string `json:"payment_type"`
+	TransactionID     string `json:"transaction_id"`
+}
+
 func (m *MidtransClient) CreateSnapTransaction(ctx context.Context, payload map[string]any) (*SnapResponse, error) {
 	if !m.Enabled() {
 		return nil, errors.New("midtrans is not configured (MIDTRANS_SERVER_KEY missing)")
@@ -124,6 +134,43 @@ func (m *MidtransClient) CancelTransaction(ctx context.Context, orderID string) 
 		return fmt.Errorf("midtrans cancel error %d: %s", resp.StatusCode, body)
 	}
 	return nil
+}
+
+func (m *MidtransClient) GetTransactionStatus(ctx context.Context, orderID string) (*TransactionStatusResponse, error) {
+	if !m.Enabled() {
+		return nil, errors.New("midtrans is not configured (MIDTRANS_SERVER_KEY missing)")
+	}
+	orderID = strings.TrimSpace(orderID)
+	if orderID == "" {
+		return nil, errors.New("midtrans status: empty order id")
+	}
+	url := fmt.Sprintf("%s/%s/status", m.coreBaseURL(), orderID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+	auth := base64.StdEncoding.EncodeToString([]byte(m.serverKey + ":"))
+	req.Header.Set("Authorization", "Basic "+auth)
+
+	resp, err := m.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("midtrans status error %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
+	}
+	var out TransactionStatusResponse
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("midtrans status decode: %w", err)
+	}
+	if out.OrderID == "" {
+		out.OrderID = orderID
+	}
+	return &out, nil
 }
 
 func (m *MidtransClient) VerifySignature(orderID, statusCode, grossAmount, signature string) bool {

@@ -10,6 +10,7 @@ var (
 	ErrUnauthorized            = errors.New("unauthorized")
 	ErrForbidden               = errors.New("forbidden")
 	ErrInvalidInput            = errors.New("invalid input")
+	ErrInvalidVoucher          = errors.New("voucher code is not valid")
 	ErrGmailRequired           = errors.New("registration requires a Gmail address")
 	ErrInvalidReferral         = errors.New("referral code not found")
 	ErrEmailNotRegistered      = errors.New("email is not registered")

@@ -2,8 +2,10 @@ package user
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
+	"regexp"
 	"strings"
 	"time"
 
@@ -20,6 +22,8 @@ const (
 	userPhotoTemplate   = "Users/%s/%s"
 )
 
+var telegramChatIDPattern = regexp.MustCompile(`^[1-9][0-9]{4,19}$`)
+
 type Service interface {
 	List(ctx context.Context, page, limit int, search string) ([]dto.UserResponse, *dto.PaginationMeta, error)
 	Get(ctx context.Context, id uuid.UUID) (*dto.UserResponse, error)
@@ -27,6 +31,8 @@ type Service interface {
 	Update(ctx context.Context, id uuid.UUID, req dto.UpdateUserRequest) (*dto.UserResponse, error)
 	Delete(ctx context.Context, id uuid.UUID) error
 	DeletePhoto(ctx context.Context, id uuid.UUID) (*dto.UserResponse, error)
+	BindTelegram(ctx context.Context, id uuid.UUID, req dto.BindTelegramRequest) (*dto.UserResponse, error)
+	DisconnectTelegram(ctx context.Context, id uuid.UUID) (*dto.UserResponse, error)
 }
 
 type service struct {
@@ -219,6 +225,41 @@ func (s *service) DeletePhoto(ctx context.Context, id uuid.UUID) (*dto.UserRespo
 	return &r, nil
 }
 
+func (s *service) BindTelegram(ctx context.Context, id uuid.UUID, req dto.BindTelegramRequest) (*dto.UserResponse, error) {
+	chatID := strings.TrimSpace(req.ChatID)
+	if !telegramChatIDPattern.MatchString(chatID) {
+		return nil, fmt.Errorf("%w: Telegram Chat ID tidak valid", domain.ErrInvalidInput)
+	}
+	u, err := s.repo.FindByID(id)
+	if err != nil {
+		return nil, err
+	}
+	if existing, err := s.repo.FindByTelegramChatID(chatID); err == nil && existing.ID != id {
+		return nil, fmt.Errorf("%w: Telegram Chat ID sudah terhubung ke akun lain", domain.ErrAlreadyExists)
+	} else if err != nil && !errors.Is(err, domain.ErrNotFound) {
+		return nil, err
+	}
+	u.TelegramChatID = &chatID
+	if err := s.repo.Update(u); err != nil {
+		return nil, err
+	}
+	r := s.toResponse(ctx, *u)
+	return &r, nil
+}
+
+func (s *service) DisconnectTelegram(ctx context.Context, id uuid.UUID) (*dto.UserResponse, error) {
+	u, err := s.repo.FindByID(id)
+	if err != nil {
+		return nil, err
+	}
+	u.TelegramChatID = nil
+	if err := s.repo.Update(u); err != nil {
+		return nil, err
+	}
+	r := s.toResponse(ctx, *u)
+	return &r, nil
+}
+
 func (s *service) toResponse(ctx context.Context, u domain.User) dto.UserResponse {
 	resp := dto.UserResponse{
 		ID:           u.ID,
@@ -232,6 +273,9 @@ func (s *service) toResponse(ctx context.Context, u domain.User) dto.UserRespons
 		LastLoginAt:  u.LastLoginAt,
 		CreatedAt:    u.CreatedAt,
 		UpdatedAt:    u.UpdatedAt,
+	}
+	if u.TelegramChatID != nil {
+		resp.TelegramChatID = *u.TelegramChatID
 	}
 	if u.Referral != nil {
 		resp.ReferralCode = u.Referral.Code

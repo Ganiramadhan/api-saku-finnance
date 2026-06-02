@@ -14,6 +14,15 @@ const (
 	SubscriptionStatusCancelled = "cancelled"
 	SubscriptionStatusFailed    = "failed"
 
+	PaymentStatusPending   = "pending"
+	PaymentStatusPaid      = "paid"
+	PaymentStatusExpired   = "expired"
+	PaymentStatusCancelled = "cancelled"
+	PaymentStatusFailed    = "failed"
+
+	VoucherDiscountFixed   = "fixed"
+	VoucherDiscountPercent = "percent"
+
 	PlanPeriodMonthly = "monthly"
 	PlanPeriodYearly  = "yearly"
 )
@@ -54,10 +63,17 @@ type Subscription struct {
 	MidtransPaymentType string     `gorm:"type:varchar(32)"`
 	SnapToken           string     `gorm:"type:varchar(64)"`
 	SnapRedirectURL     string     `gorm:"type:varchar(255)"`
+	PaymentStatus       string     `gorm:"type:varchar(16);not null;default:'pending';index"`
+	PaymentCreatedAt    *time.Time `gorm:"index"`
 	PaymentExpiresAt    *time.Time `gorm:"index"`
+	PaymentPaidAt       *time.Time
+	PaymentExpiredAt    *time.Time
 	ReferralCode        string     `gorm:"type:varchar(32);index"`
 	ReferralRewardPaid  bool       `gorm:"not null;default:false"`
 	ReferrerID          *uuid.UUID `gorm:"type:uuid;index"`
+	VoucherCode         string     `gorm:"type:varchar(32);index"`
+	OriginalAmount      float64    `gorm:"type:decimal(18,2);not null;default:0"`
+	DiscountAmount      float64    `gorm:"type:decimal(18,2);not null;default:0"`
 
 	StartsAt      *time.Time
 	EndsAt        *time.Time
@@ -79,6 +95,77 @@ type Subscription struct {
 func (s *Subscription) BeforeCreate(_ *gorm.DB) error {
 	if s.ID == uuid.Nil {
 		s.ID = uuid.New()
+	}
+	return nil
+}
+
+type SubscriptionPayment struct {
+	ID             uuid.UUID `gorm:"type:uuid;primaryKey"`
+	SubscriptionID uuid.UUID `gorm:"type:uuid;not null;index"`
+	UserID         uuid.UUID `gorm:"type:uuid;not null;index"`
+	OrderID        string    `gorm:"type:varchar(64);not null;uniqueIndex"`
+	TransactionID  string    `gorm:"type:varchar(64);index"`
+	PaymentType    string    `gorm:"type:varchar(32);index"`
+	Status         string    `gorm:"type:varchar(16);not null;default:'pending';index"`
+	Amount         float64   `gorm:"type:decimal(18,2);not null"`
+	Currency       string    `gorm:"type:varchar(8);not null;default:'IDR'"`
+	SnapToken      string    `gorm:"type:varchar(64)"`
+	RedirectURL    string    `gorm:"type:varchar(255)"`
+	CreatedAt      time.Time
+	ExpiresAt      *time.Time `gorm:"index"`
+	PaidAt         *time.Time
+	ExpiredAt      *time.Time
+	UpdatedAt      time.Time
+
+	Subscription *Subscription `gorm:"foreignKey:SubscriptionID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
+	User         *User         `gorm:"foreignKey:UserID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
+}
+
+func (p *SubscriptionPayment) BeforeCreate(_ *gorm.DB) error {
+	if p.ID == uuid.Nil {
+		p.ID = uuid.New()
+	}
+	return nil
+}
+
+type SubscriptionPaymentEvent struct {
+	ID             uuid.UUID `gorm:"type:uuid;primaryKey"`
+	SubscriptionID uuid.UUID `gorm:"type:uuid;not null;index"`
+	PaymentID      uuid.UUID `gorm:"type:uuid;not null;index"`
+	OrderID        string    `gorm:"type:varchar(64);not null;index"`
+	FromStatus     string    `gorm:"type:varchar(16)"`
+	ToStatus       string    `gorm:"type:varchar(16);not null;index"`
+	Reason         string    `gorm:"type:varchar(64)"`
+	CreatedAt      time.Time
+}
+
+func (e *SubscriptionPaymentEvent) BeforeCreate(_ *gorm.DB) error {
+	if e.ID == uuid.Nil {
+		e.ID = uuid.New()
+	}
+	return nil
+}
+
+type Voucher struct {
+	ID             uuid.UUID  `gorm:"type:uuid;primaryKey"`
+	Code           string     `gorm:"type:varchar(32);not null;uniqueIndex"`
+	Name           string     `gorm:"type:varchar(96);not null"`
+	DiscountType   string     `gorm:"type:varchar(16);not null;default:'fixed'"`
+	DiscountValue  float64    `gorm:"type:decimal(18,2);not null"`
+	MaxDiscount    float64    `gorm:"type:decimal(18,2);not null;default:0"`
+	MinAmount      float64    `gorm:"type:decimal(18,2);not null;default:0"`
+	MaxRedemptions int        `gorm:"not null;default:0"`
+	UsedCount      int        `gorm:"not null;default:0"`
+	StartsAt       *time.Time `gorm:"index"`
+	EndsAt         *time.Time `gorm:"index"`
+	IsActive       bool       `gorm:"not null;default:true;index"`
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
+func (v *Voucher) BeforeCreate(_ *gorm.DB) error {
+	if v.ID == uuid.Nil {
+		v.ID = uuid.New()
 	}
 	return nil
 }

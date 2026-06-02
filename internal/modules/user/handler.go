@@ -69,6 +69,34 @@ func (h *Handler) UpdateMe(c *fiber.Ctx) error {
 	return httpx.OK(c, constants.MsgUpdateUser, u)
 }
 
+func (h *Handler) BindTelegram(c *fiber.Ctx) error {
+	uid, err := httpx.UserID(c)
+	if err != nil {
+		return err
+	}
+	var req dto.BindTelegramRequest
+	if err := httpx.Bind(c, h.validator, &req); err != nil {
+		return err
+	}
+	u, err := h.service.BindTelegram(c.Context(), uid, req)
+	if err != nil {
+		return err
+	}
+	return httpx.OK(c, constants.MsgUpdateUser, u)
+}
+
+func (h *Handler) DisconnectTelegram(c *fiber.Ctx) error {
+	uid, err := httpx.UserID(c)
+	if err != nil {
+		return err
+	}
+	u, err := h.service.DisconnectTelegram(c.Context(), uid)
+	if err != nil {
+		return err
+	}
+	return httpx.OK(c, constants.MsgUpdateUser, u)
+}
+
 // UploadPhoto godoc
 // @Summary   Upload user photo
 // @Description Uploads an optimized WebP image to Temp/Users/. Returns the object key — pass it as `photo` to PUT /users/me (or admin Create/Update) to attach it to a user.
