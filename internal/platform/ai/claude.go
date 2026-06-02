@@ -39,7 +39,10 @@ func (c *Client) AskWithSystem(ctx context.Context, system, prompt string) (stri
 			},
 		}
 		if system != "" {
-			params.System = []anthropic.TextBlockParam{{Text: system}}
+			params.System = []anthropic.TextBlockParam{{
+				Text:         system,
+				CacheControl: anthropic.NewCacheControlEphemeralParam(),
+			}}
 		}
 
 		msg, err := c.sdk.Messages.New(ctx, params)
@@ -77,7 +80,10 @@ func (c *Client) AskImage(ctx context.Context, system, prompt, mediaType, base64
 			},
 		}
 		if system != "" {
-			params.System = []anthropic.TextBlockParam{{Text: system}}
+			params.System = []anthropic.TextBlockParam{{
+				Text:         system,
+				CacheControl: anthropic.NewCacheControlEphemeralParam(),
+			}}
 		}
 
 		msg, err := c.sdk.Messages.New(ctx, params)

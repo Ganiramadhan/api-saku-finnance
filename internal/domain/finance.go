@@ -82,6 +82,28 @@ func (t *WalletTarget) BeforeCreate(_ *gorm.DB) error {
 	return nil
 }
 
+type WalletTransfer struct {
+	ID           uuid.UUID `gorm:"type:uuid;primaryKey"`
+	UserID       uuid.UUID `gorm:"type:uuid;not null;index"`
+	FromWalletID uuid.UUID `gorm:"type:uuid;not null;index"`
+	ToWalletID   uuid.UUID `gorm:"type:uuid;not null;index"`
+	Amount       float64   `gorm:"type:decimal(18,2);not null"`
+	Currency     string    `gorm:"type:varchar(8);not null;default:'IDR'"`
+	Note         string    `gorm:"type:varchar(255)"`
+	CreatedAt    time.Time
+
+	User       *User   `gorm:"foreignKey:UserID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
+	FromWallet *Wallet `gorm:"foreignKey:FromWalletID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
+	ToWallet   *Wallet `gorm:"foreignKey:ToWalletID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
+}
+
+func (t *WalletTransfer) BeforeCreate(_ *gorm.DB) error {
+	if t.ID == uuid.Nil {
+		t.ID = uuid.New()
+	}
+	return nil
+}
+
 type Category struct {
 	ID       uuid.UUID  `gorm:"type:uuid;primaryKey"`
 	UserID   *uuid.UUID `gorm:"type:uuid;index"`
@@ -154,6 +176,50 @@ type AIProcessingLog struct {
 	UpdatedAt time.Time
 
 	User *User `gorm:"foreignKey:UserID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
+}
+
+type SupportTicket struct {
+	ID        uuid.UUID `gorm:"type:uuid;primaryKey"`
+	UserID    uuid.UUID `gorm:"type:uuid;not null;index"`
+	Subject   string    `gorm:"type:varchar(180);not null"`
+	Category  string    `gorm:"type:varchar(64);not null"`
+	Priority  string    `gorm:"type:varchar(20);not null;default:'normal'"`
+	Status    string    `gorm:"type:varchar(24);not null;default:'open';index"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	DeletedAt gorm.DeletedAt `gorm:"index"`
+
+	User     *User            `gorm:"foreignKey:UserID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
+	Messages []SupportMessage `gorm:"foreignKey:TicketID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
+}
+
+func (t *SupportTicket) BeforeCreate(_ *gorm.DB) error {
+	if t.ID == uuid.Nil {
+		t.ID = uuid.New()
+	}
+	return nil
+}
+
+type SupportMessage struct {
+	ID             uuid.UUID `gorm:"type:uuid;primaryKey"`
+	TicketID       uuid.UUID `gorm:"type:uuid;not null;index"`
+	UserID         uuid.UUID `gorm:"type:uuid;not null;index"`
+	Role           string    `gorm:"type:varchar(16);not null"`
+	Body           string    `gorm:"type:text;not null"`
+	AttachmentKey  string    `gorm:"type:varchar(512)"`
+	AttachmentName string    `gorm:"type:varchar(255)"`
+	AttachmentType string    `gorm:"type:varchar(80)"`
+	CreatedAt      time.Time
+
+	Ticket *SupportTicket `gorm:"foreignKey:TicketID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
+	User   *User          `gorm:"foreignKey:UserID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
+}
+
+func (m *SupportMessage) BeforeCreate(_ *gorm.DB) error {
+	if m.ID == uuid.Nil {
+		m.ID = uuid.New()
+	}
+	return nil
 }
 
 func (AIProcessingLog) TableName() string {

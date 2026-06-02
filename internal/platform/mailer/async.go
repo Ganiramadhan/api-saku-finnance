@@ -25,8 +25,16 @@ func NewAsync(next Mailer, buffer int) Mailer {
 }
 
 func (m *AsyncMailer) Send(to, subject, body string) error {
-	m.jobs <- Message{To: to, Subject: subject, Body: body}
-	log.Printf("mailer broker: queued to=%q subject=%q", to, subject)
+	job := Message{To: to, Subject: subject, Body: body}
+	select {
+	case m.jobs <- job:
+		log.Printf("mailer broker: queued to=%q subject=%q", to, subject)
+	default:
+		log.Printf("mailer broker: queue full, deferring enqueue to=%q subject=%q", to, subject)
+		go func() {
+			m.jobs <- job
+		}()
+	}
 	return nil
 }
 

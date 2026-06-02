@@ -231,6 +231,17 @@ func (s *fakeStorage) Delete(ctx context.Context, key string) error {
 	return nil
 }
 
+func (s *fakeStorage) DeletePrefixOlderThan(ctx context.Context, prefix string, olderThan time.Duration) (int, error) {
+	deleted := 0
+	for key := range s.objects {
+		if strings.HasPrefix(key, prefix) {
+			delete(s.objects, key)
+			deleted++
+		}
+	}
+	return deleted, nil
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────

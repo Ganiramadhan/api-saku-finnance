@@ -109,8 +109,14 @@ func (h *Handler) ForgotPassword(c *fiber.Ctx) error {
 	if err := httpx.Bind(c, h.validator, &req); err != nil {
 		return err
 	}
-	if err := h.turnstile.Verify(c.Context(), req.TurnstileToken, c.IP()); err != nil {
-		return err
+	if !req.Resend {
+		if err := h.turnstile.Verify(c.Context(), req.TurnstileToken, c.IP()); err != nil {
+			return err
+		}
+	} else if req.TurnstileToken != "" {
+		if err := h.turnstile.Verify(c.Context(), req.TurnstileToken, c.IP()); err != nil {
+			return err
+		}
 	}
 	if err := h.service.ForgotPassword(c.Context(), req); err != nil {
 		return err

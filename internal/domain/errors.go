@@ -8,6 +8,7 @@ var (
 	ErrInvalidCredentials      = errors.New("invalid credentials")
 	ErrAccountNotVerified      = errors.New("account is not verified")
 	ErrUnauthorized            = errors.New("unauthorized")
+	ErrForbidden               = errors.New("forbidden")
 	ErrInvalidInput            = errors.New("invalid input")
 	ErrGmailRequired           = errors.New("registration requires a Gmail address")
 	ErrInvalidReferral         = errors.New("referral code not found")

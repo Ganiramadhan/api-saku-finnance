@@ -14,15 +14,17 @@ import (
 )
 
 const freeWalletLimit = 2
-const proWalletLimit = 10
-const premiumWalletLimit = 50
+const proWalletLimit = 1000000
+const premiumWalletLimit = 1000000
 
 type Service interface {
 	List(ctx context.Context, userID uuid.UUID) ([]dto.WalletResponse, error)
+	ListTransfers(ctx context.Context, userID uuid.UUID, limit int) ([]dto.WalletTransferResponse, error)
 	Get(ctx context.Context, userID, id uuid.UUID) (*dto.WalletResponse, error)
 	Create(ctx context.Context, userID uuid.UUID, req dto.CreateWalletRequest) (*dto.WalletResponse, error)
 	Update(ctx context.Context, userID, id uuid.UUID, req dto.UpdateWalletRequest) (*dto.WalletResponse, error)
 	Transfer(ctx context.Context, userID uuid.UUID, req dto.TransferWalletBalanceRequest) error
+	DeleteTransfers(ctx context.Context, userID uuid.UUID, ids []uuid.UUID) error
 	Delete(ctx context.Context, userID, id uuid.UUID) error
 }
 
@@ -64,6 +66,29 @@ func toResp(w domain.Wallet) dto.WalletResponse {
 	}
 }
 
+func transferToResp(t domain.WalletTransfer) dto.WalletTransferResponse {
+	fromName := ""
+	if t.FromWallet != nil {
+		fromName = t.FromWallet.Name
+	}
+	toName := ""
+	if t.ToWallet != nil {
+		toName = t.ToWallet.Name
+	}
+	return dto.WalletTransferResponse{
+		ID:             t.ID,
+		UserID:         t.UserID,
+		FromWalletID:   t.FromWalletID,
+		FromWalletName: fromName,
+		ToWalletID:     t.ToWalletID,
+		ToWalletName:   toName,
+		Amount:         t.Amount,
+		Currency:       t.Currency,
+		Note:           t.Note,
+		CreatedAt:      t.CreatedAt,
+	}
+}
+
 func (s *service) List(_ context.Context, userID uuid.UUID) ([]dto.WalletResponse, error) {
 	rows, err := s.repo.List(userID)
 	if err != nil {
@@ -72,6 +97,18 @@ func (s *service) List(_ context.Context, userID uuid.UUID) ([]dto.WalletRespons
 	out := make([]dto.WalletResponse, 0, len(rows))
 	for _, w := range rows {
 		out = append(out, toResp(w))
+	}
+	return out, nil
+}
+
+func (s *service) ListTransfers(_ context.Context, userID uuid.UUID, limit int) ([]dto.WalletTransferResponse, error) {
+	rows, err := s.repo.ListTransfers(userID, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]dto.WalletTransferResponse, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, transferToResp(row))
 	}
 	return out, nil
 }
@@ -209,11 +246,26 @@ func (s *service) Transfer(_ context.Context, userID uuid.UUID, req dto.Transfer
 		if err := txr.Update(to); err != nil {
 			return err
 		}
+		if err := txr.CreateTransfer(&domain.WalletTransfer{
+			ID:           uuid.New(),
+			UserID:       userID,
+			FromWalletID: from.ID,
+			ToWalletID:   to.ID,
+			Amount:       req.Amount,
+			Currency:     from.Currency,
+			Note:         strings.TrimSpace(req.Note),
+		}); err != nil {
+			return err
+		}
 		if from.Target != nil {
 			return tx.Where("wallet_id = ?", from.ID).Delete(&domain.WalletTarget{}).Error
 		}
 		return nil
 	})
+}
+
+func (s *service) DeleteTransfers(_ context.Context, userID uuid.UUID, ids []uuid.UUID) error {
+	return s.repo.DeleteTransfers(userID, ids)
 }
 
 func (s *service) Delete(_ context.Context, userID, id uuid.UUID) error {
@@ -230,10 +282,10 @@ func (s *service) enforceFreeWalletLimit(ctx context.Context, userID uuid.UUID) 
 		}
 		if active {
 			limit = proWalletLimit
-			message = "Pro plan can create up to 10 wallets. Upgrade to Premium for more wallets"
+			message = "Pro plan includes unlimited wallets"
 			if strings.Contains(planCode, "premium") {
 				limit = premiumWalletLimit
-				message = "Premium plan can create up to 50 wallets"
+				message = "Premium plan includes unlimited wallets"
 			}
 		}
 	}

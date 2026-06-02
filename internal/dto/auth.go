@@ -51,6 +51,7 @@ type GoogleLoginRequest struct {
 type ForgotPasswordRequest struct {
 	Email          string `json:"email" validate:"required,email" example:"john@example.com"`
 	TurnstileToken string `json:"turnstile_token,omitempty"`
+	Resend         bool   `json:"resend,omitempty"`
 }
 
 type ResetPasswordRequest struct {

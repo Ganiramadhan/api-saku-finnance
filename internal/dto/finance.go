@@ -33,6 +33,11 @@ type TransferWalletBalanceRequest struct {
 	ToWalletID        uuid.UUID `json:"to_wallet_id" validate:"required"`
 	Amount            float64   `json:"amount" validate:"required,gt=0"`
 	ClearSourceTarget bool      `json:"clear_source_target"`
+	Note              string    `json:"note" validate:"omitempty,max=255"`
+}
+
+type DeleteWalletTransfersRequest struct {
+	IDs []uuid.UUID `json:"ids" validate:"required,min=1,dive,required"`
 }
 
 type WalletResponse struct {
@@ -48,6 +53,19 @@ type WalletResponse struct {
 	TargetDeadline *time.Time `json:"target_deadline,omitempty"`
 	CreatedAt      time.Time  `json:"created_at"`
 	UpdatedAt      time.Time  `json:"updated_at"`
+}
+
+type WalletTransferResponse struct {
+	ID             uuid.UUID `json:"id"`
+	UserID         uuid.UUID `json:"user_id"`
+	FromWalletID   uuid.UUID `json:"from_wallet_id"`
+	FromWalletName string    `json:"from_wallet_name"`
+	ToWalletID     uuid.UUID `json:"to_wallet_id"`
+	ToWalletName   string    `json:"to_wallet_name"`
+	Amount         float64   `json:"amount"`
+	Currency       string    `json:"currency"`
+	Note           string    `json:"note,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 type CreateCategoryRequest struct {
@@ -149,6 +167,54 @@ type DeleteAIProcessingLogsRequest struct {
 	IDs []uuid.UUID `json:"ids" validate:"required,min=1,dive,required"`
 }
 
+type CreateSupportTicketRequest struct {
+	Subject        string `json:"subject" validate:"required,min=3,max=180"`
+	Category       string `json:"category" validate:"required,min=2,max=64"`
+	Priority       string `json:"priority" validate:"omitempty,oneof=normal high urgent"`
+	Message        string `json:"message" validate:"required,min=3,max=4000"`
+	AttachmentKey  string `json:"attachment_key" validate:"omitempty,max=512"`
+	AttachmentName string `json:"attachment_name" validate:"omitempty,max=255"`
+	AttachmentType string `json:"attachment_type" validate:"omitempty,max=80"`
+}
+
+type ReplySupportTicketRequest struct {
+	Message        string `json:"message" validate:"omitempty,max=4000"`
+	AttachmentKey  string `json:"attachment_key" validate:"omitempty,max=512"`
+	AttachmentName string `json:"attachment_name" validate:"omitempty,max=255"`
+	AttachmentType string `json:"attachment_type" validate:"omitempty,max=80"`
+}
+
+type UpdateSupportTicketStatusRequest struct {
+	Status string `json:"status" validate:"required,oneof=open waiting_user resolved"`
+}
+
+type SupportMessageResponse struct {
+	ID             uuid.UUID `json:"id"`
+	TicketID       uuid.UUID `json:"ticket_id"`
+	UserID         uuid.UUID `json:"user_id"`
+	Role           string    `json:"role"`
+	Body           string    `json:"body"`
+	AttachmentKey  string    `json:"attachment_key,omitempty"`
+	AttachmentName string    `json:"attachment_name,omitempty"`
+	AttachmentType string    `json:"attachment_type,omitempty"`
+	AttachmentURL  string    `json:"attachment_url,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
+}
+
+type SupportTicketResponse struct {
+	ID        uuid.UUID                `json:"id"`
+	UserID    uuid.UUID                `json:"user_id"`
+	UserName  string                   `json:"user_name,omitempty"`
+	UserEmail string                   `json:"user_email,omitempty"`
+	Subject   string                   `json:"subject"`
+	Category  string                   `json:"category"`
+	Priority  string                   `json:"priority"`
+	Status    string                   `json:"status"`
+	Messages  []SupportMessageResponse `json:"messages,omitempty"`
+	CreatedAt time.Time                `json:"created_at"`
+	UpdatedAt time.Time                `json:"updated_at"`
+}
+
 type CreateBudgetRequest struct {
 	WalletID    uuid.UUID `json:"wallet_id" validate:"required"`
 	CategoryID  uuid.UUID `json:"category_id" validate:"required"`
@@ -181,6 +247,8 @@ type CategorizeRequest struct {
 	UserCategories []string `json:"user_categories" validate:"omitempty" example:"Food,Shopping,Transport"`
 	SessionID      string   `json:"session_id,omitempty" validate:"omitempty,max=120"`
 	Language       string   `json:"language,omitempty" validate:"omitempty,oneof=id en"`
+	ReferenceDate  string   `json:"reference_date,omitempty" validate:"omitempty,max=40"`
+	Timezone       string   `json:"timezone,omitempty" validate:"omitempty,max=80"`
 }
 
 type CategorizeResponse struct {
@@ -196,14 +264,15 @@ type CategorizeResponse struct {
 }
 
 type CategorizeItem struct {
-	Amount       float64 `json:"amount" example:"14000"`
-	MerchantName string  `json:"merchant_name" example:"Warung Bubur Ayam"`
-	Category     string  `json:"category" example:"Food & Beverage"`
-	Type         string  `json:"type" example:"expense"`
-	Confidence   float64 `json:"confidence" example:"0.9"`
-	Description  string  `json:"description,omitempty" example:"bubur ayam"`
-	Date         string  `json:"date,omitempty" example:"2026-05-20"`
-	WalletHint   string  `json:"wallet_hint,omitempty" example:"Cash"`
+	Amount        float64 `json:"amount" example:"14000"`
+	MerchantName  string  `json:"merchant_name" example:"Warung Bubur Ayam"`
+	Category      string  `json:"category" example:"Food & Beverage"`
+	Type          string  `json:"type" example:"expense"`
+	Confidence    float64 `json:"confidence" example:"0.9"`
+	Description   string  `json:"description,omitempty" example:"bubur ayam"`
+	Date          string  `json:"date,omitempty" example:"2026-05-20"`
+	WalletHint    string  `json:"wallet_hint,omitempty" example:"Cash"`
+	RecurringHint string  `json:"recurring_hint,omitempty" example:"setiap bulan"`
 }
 
 // ScanReceiptRequest accepts a base64-encoded receipt image (JPEG/PNG/WebP).
@@ -286,6 +355,8 @@ type ChatRequest struct {
 	History        []ChatTurn `json:"history,omitempty"`
 	SessionID      string     `json:"session_id,omitempty" validate:"omitempty,max=120"`
 	Language       string     `json:"language,omitempty" validate:"omitempty,oneof=id en"`
+	ReferenceDate  string     `json:"reference_date,omitempty" validate:"omitempty,max=40"`
+	Timezone       string     `json:"timezone,omitempty" validate:"omitempty,max=80"`
 }
 
 type ChatResponse struct {

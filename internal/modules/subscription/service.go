@@ -488,7 +488,7 @@ func paymentSuccessEmailHTML(name, planName, period string, amount float64, curr
 	}
 	validUntil := "-"
 	if endsAt != nil {
-		validUntil = endsAt.Format("02 Jan 2006 15:04 MST")
+		validUntil = endsAt.Format("02 Jan 2006")
 	}
 	detail := fmt.Sprintf("Plan: %s %s\nAmount: %s %.0f\nOrder ID: %s\nActive until: %s", planName, period, currency, amount, orderID, validUntil)
 	return mailer.BlueTemplate(mailer.BlueTemplateData{

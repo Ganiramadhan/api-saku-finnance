@@ -36,6 +36,51 @@ func (h *Handler) List(c *fiber.Ctx) error {
 	return httpx.OK(c, constants.MsgGetWallets, out)
 }
 
+// ListTransfers godoc
+// @Summary  List wallet transfer history
+// @Tags     Wallets
+// @Produce  json
+// @Param    limit query int false "Max rows"
+// @Success  200 {object} dto.APIResponse{data=[]dto.WalletTransferResponse}
+// @Security BearerAuth
+// @Router   /api/v1/wallets/transfers [get]
+func (h *Handler) ListTransfers(c *fiber.Ctx) error {
+	uid, err := httpx.UserID(c)
+	if err != nil {
+		return err
+	}
+	limit := c.QueryInt("limit", 20)
+	out, err := h.service.ListTransfers(c.Context(), uid, limit)
+	if err != nil {
+		return err
+	}
+	return httpx.OK(c, "Wallet transfer history retrieved", out)
+}
+
+// DeleteTransfers godoc
+// @Summary  Delete wallet transfer history rows
+// @Tags     Wallets
+// @Accept   json
+// @Produce  json
+// @Param    request body dto.DeleteWalletTransfersRequest true "Transfer history IDs"
+// @Success  200 {object} dto.APIResponse
+// @Security BearerAuth
+// @Router   /api/v1/wallets/transfers [delete]
+func (h *Handler) DeleteTransfers(c *fiber.Ctx) error {
+	uid, err := httpx.UserID(c)
+	if err != nil {
+		return err
+	}
+	var req dto.DeleteWalletTransfersRequest
+	if err := httpx.Bind(c, h.validator, &req); err != nil {
+		return err
+	}
+	if err := h.service.DeleteTransfers(c.Context(), uid, req.IDs); err != nil {
+		return err
+	}
+	return httpx.OK(c, "Wallet transfer history deleted", nil)
+}
+
 // Get godoc
 // @Summary  Get wallet by ID
 // @Tags     Wallets

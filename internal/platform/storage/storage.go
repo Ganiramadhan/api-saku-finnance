@@ -12,4 +12,5 @@ type Storage interface {
 	PresignedURL(ctx context.Context, objectKey string, ttl time.Duration) (string, error)
 	Move(ctx context.Context, srcKey, dstKey string) error
 	Delete(ctx context.Context, objectKey string) error
+	DeletePrefixOlderThan(ctx context.Context, prefix string, olderThan time.Duration) (int, error)
 }

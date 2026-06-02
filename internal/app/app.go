@@ -23,6 +23,7 @@ import (
 	"github.com/ganiramadhan/starter-go/internal/modules/savingsgoal"
 	"github.com/ganiramadhan/starter-go/internal/modules/splitbill"
 	"github.com/ganiramadhan/starter-go/internal/modules/subscription"
+	"github.com/ganiramadhan/starter-go/internal/modules/support"
 	"github.com/ganiramadhan/starter-go/internal/modules/transaction"
 	"github.com/ganiramadhan/starter-go/internal/modules/upcomingbilling"
 	"github.com/ganiramadhan/starter-go/internal/modules/user"
@@ -167,7 +168,7 @@ func (a *App) initHTTP() {
 	a.fiber.Use(middleware.SecurityHeaders())
 	a.fiber.Use(cors.New(cors.Config{
 		AllowOrigins:     a.cfg.CORS.AllowOrigins,
-		AllowMethods:     "GET,POST,PUT,DELETE,OPTIONS",
+		AllowMethods:     "GET,POST,PUT,PATCH,DELETE,OPTIONS",
 		AllowHeaders:     "Origin,Content-Type,Accept,Authorization,X-Request-ID",
 		AllowCredentials: true,
 	}))
@@ -189,6 +190,7 @@ func (a *App) initHTTP() {
 	subRepo := subscription.NewRepository(a.db)
 	billingRepo := upcomingbilling.NewRepository(a.db)
 	notificationRepo := notification.NewRepository(a.db)
+	supportRepo := support.NewRepository(a.db)
 	mailClient := mailer.New(mailer.Config{
 		Mailer:     a.cfg.Mail.Mailer,
 		Host:       a.cfg.Mail.Host,
@@ -217,6 +219,7 @@ func (a *App) initHTTP() {
 	splitSvc := splitbill.NewService(splitRepo)
 	billingSvc := upcomingbilling.NewService(billingRepo, subSvc)
 	notificationSvc := notification.NewService(notificationRepo)
+	supportSvc := support.NewService(supportRepo, a.storage)
 
 	// AI (Claude)
 	claudeClient := aiplatform.NewClient(a.cfg.Claude.APIKey, a.cfg.Claude.Model)
@@ -225,7 +228,7 @@ func (a *App) initHTTP() {
 	txnHandler := transaction.NewHandler(txnSvc, a.validator)
 	txnHandler.SetExportService(txnExportSvc)
 
-	routes.Register(a.fiber, routes.Handlers{
+	handlers := routes.Handlers{
 		Auth:         auth.NewHandler(authSvc, a.validator, a.cfg.Turnstile.SecretKey),
 		User:         user.NewHandler(userSvc, a.storage, a.validator),
 		Wallet:       wallet.NewHandler(walletSvc, a.validator),
@@ -239,7 +242,8 @@ func (a *App) initHTTP() {
 		Billing:      upcomingbilling.NewHandler(billingSvc, a.validator),
 		AI:           aimodule.NewHandler(aiSvc, a.validator),
 		Notification: notification.NewHandler(notificationSvc, a.validator),
-	}, jwtMgr)
+	}.WithSupport(support.NewHandler(supportSvc, a.storage, a.validator))
+	routes.Register(a.fiber, handlers, jwtMgr)
 
 	a.startReminderJob(billingRepo, subRepo, notificationSvc, mailClient)
 }
@@ -254,17 +258,22 @@ func (a *App) startReminderJob(
 	a.stopJobs = cancel
 	go func() {
 		a.expirePendingSubscriptions(subRepo)
+		a.cleanupTempStorage()
 		a.runReminderPass(ctx, billingRepo, subRepo, notificationSvc, mailClient)
 		reminderTicker := time.NewTicker(24 * time.Hour)
 		expiryTicker := time.NewTicker(5 * time.Minute)
+		storageTicker := time.NewTicker(1 * time.Hour)
 		defer reminderTicker.Stop()
 		defer expiryTicker.Stop()
+		defer storageTicker.Stop()
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-expiryTicker.C:
 				a.expirePendingSubscriptions(subRepo)
+			case <-storageTicker.C:
+				a.cleanupTempStorage()
 			case <-reminderTicker.C:
 				a.expirePendingSubscriptions(subRepo)
 				a.runReminderPass(ctx, billingRepo, subRepo, notificationSvc, mailClient)
@@ -276,6 +285,22 @@ func (a *App) startReminderJob(
 func (a *App) expirePendingSubscriptions(subRepo subscription.Repository) {
 	if err := subRepo.ExpirePendingBefore(time.Now().UTC()); err != nil {
 		log.Printf("subscription cleanup: expire pending subscriptions: %v", err)
+	}
+}
+
+func (a *App) cleanupTempStorage() {
+	if a.storage == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	deleted, err := a.storage.DeletePrefixOlderThan(ctx, "Temp/", 24*time.Hour)
+	if err != nil {
+		log.Printf("storage cleanup: delete temp objects: %v", err)
+		return
+	}
+	if deleted > 0 {
+		log.Printf("storage cleanup: deleted %d temp objects", deleted)
 	}
 }
 

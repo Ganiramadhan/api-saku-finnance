@@ -13,6 +13,7 @@ import (
 	"github.com/ganiramadhan/starter-go/internal/modules/savingsgoal"
 	"github.com/ganiramadhan/starter-go/internal/modules/splitbill"
 	"github.com/ganiramadhan/starter-go/internal/modules/subscription"
+	"github.com/ganiramadhan/starter-go/internal/modules/support"
 	"github.com/ganiramadhan/starter-go/internal/modules/transaction"
 	"github.com/ganiramadhan/starter-go/internal/modules/upcomingbilling"
 	"github.com/ganiramadhan/starter-go/internal/modules/user"
@@ -35,6 +36,12 @@ type Handlers struct {
 	Billing      *upcomingbilling.Handler
 	AI           *ai.Handler
 	Notification *notification.Handler
+	Support      *support.Handler
+}
+
+func (h Handlers) WithSupport(s *support.Handler) Handlers {
+	h.Support = s
+	return h
 }
 
 func Register(app *fiber.App, h Handlers, jwtMgr *jwt.Manager) {
@@ -73,6 +80,8 @@ func Register(app *fiber.App, h Handlers, jwtMgr *jwt.Manager) {
 	wallets := v1.Group("/wallets", authRequired)
 	wallets.Get("", h.Wallet.List)
 	wallets.Post("", h.Wallet.Create)
+	wallets.Get("/transfers", h.Wallet.ListTransfers)
+	wallets.Delete("/transfers", h.Wallet.DeleteTransfers)
 	wallets.Post("/transfer", h.Wallet.Transfer)
 	wallets.Get("/:id", h.Wallet.Get)
 	wallets.Put("/:id", h.Wallet.Update)
@@ -115,6 +124,12 @@ func Register(app *fiber.App, h Handlers, jwtMgr *jwt.Manager) {
 	notifications.Get("", h.Notification.List)
 	notifications.Post("/read-all", h.Notification.MarkAllRead)
 	notifications.Post("/:id/read", h.Notification.MarkRead)
+
+	supportTickets := v1.Group("/support-tickets", authRequired)
+	supportTickets.Get("", h.Support.List)
+	supportTickets.Post("", h.Support.Create)
+	supportTickets.Post("/attachments", h.Support.UploadAttachment)
+	supportTickets.Post("/:id/reply", h.Support.Reply)
 
 	goals := v1.Group("/savings-goals", authRequired)
 	goals.Get("", h.SavingsGoal.List)
@@ -164,6 +179,10 @@ func Register(app *fiber.App, h Handlers, jwtMgr *jwt.Manager) {
 	adminUsers.Put("/:id", h.User.Update)
 	adminUsers.Delete("/:id", h.User.Delete)
 	admin.Get("/subscriptions", h.Subscription.ListAllAdmin)
+	admin.Get("/support-tickets", h.Support.List)
+	admin.Post("/support-tickets/attachments", h.Support.UploadAttachment)
+	admin.Post("/support-tickets/:id/reply", h.Support.Reply)
+	admin.Patch("/support-tickets/:id/status", h.Support.UpdateStatus)
 	// ---------------- Super Admin (auth + role=super_admin) ----------------
 	superAdmin := v1.Group("/admin", authRequired, middleware.RequireSuperAdmin)
 	superAdmin.Get("/ai-logs", h.AILog.ListAll)

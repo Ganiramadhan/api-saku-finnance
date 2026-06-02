@@ -12,8 +12,8 @@ import (
 )
 
 const freeBillingLimit = 3
-const proBillingLimit = 20
-const premiumBillingLimit = 100
+const proBillingLimit = 1000000
+const premiumBillingLimit = 1000000
 
 type Service interface {
 	List(ctx context.Context, userID uuid.UUID) ([]dto.UpcomingBillingResponse, error)
@@ -104,10 +104,10 @@ func (s *service) enforceBillingLimit(ctx context.Context, userID uuid.UUID) err
 		}
 		if active {
 			limit = proBillingLimit
-			message = "Pro plan can create up to 20 upcoming billings. Upgrade to Premium for more billing reminders"
+			message = "Pro plan includes unlimited upcoming billings"
 			if strings.Contains(planCode, "premium") {
 				limit = premiumBillingLimit
-				message = "Premium plan can create up to 100 upcoming billings"
+				message = "Premium plan includes unlimited upcoming billings"
 			}
 		}
 	}

@@ -35,12 +35,12 @@ const (
 	featureSuggestBudget = "suggest_budget"
 	featureChat          = "chat"
 
-	freeScanReceiptDailyLimit = 3
-	freeChatDailyLimit        = 5
-	proChatMonthlyLimit       = 300
-	proScanMonthlyLimit       = 90
-	premiumChatMonthlyLimit   = 1200
-	premiumScanMonthlyLimit   = 300
+	freeScanReceiptMonthlyLimit = 10
+	freeChatMonthlyLimit        = 20
+	proChatMonthlyLimit         = 300
+	proScanMonthlyLimit         = 100
+	premiumChatMonthlyLimit     = 1200
+	premiumScanMonthlyLimit     = 300
 )
 
 type Service interface {
@@ -90,17 +90,16 @@ func (s *service) enforceDailyQuota(ctx context.Context, userID uuid.UUID, featu
 	}
 
 	now := time.Now()
-	since := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	since := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
 	effectiveLimit := limit
 	effectiveMessage := message
 	if hasActivePlan {
-		since = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
 		if containsFeature(features, featureScanReceipt) {
 			effectiveLimit = proScanMonthlyLimit
-			effectiveMessage = "Pro plan monthly receipt scan limit reached. Upgrade to Premium for more receipt scans"
+			effectiveMessage = "Pro plan monthly OCR limit reached. Upgrade to Premium for more receipt scans"
 			if strings.Contains(planCode, "premium") {
 				effectiveLimit = premiumScanMonthlyLimit
-				effectiveMessage = "Premium plan monthly receipt scan limit reached"
+				effectiveMessage = "Premium plan monthly OCR limit reached"
 			}
 		} else {
 			effectiveLimit = proChatMonthlyLimit
@@ -177,11 +176,11 @@ OUTPUT RULES:
 // ─── 1. Categorize from raw text ────────────────────────────────────────────
 
 func (s *service) Categorize(ctx context.Context, userID uuid.UUID, req dto.CategorizeRequest) (dto.CategorizeResponse, error) {
-	if err := s.enforceDailyQuota(ctx, userID, []string{featureCategorize, featureChat}, freeChatDailyLimit, "Free plan can use Chat with AI up to 5 times per day. Upgrade to Pro for unlimited AI chat"); err != nil {
+	if err := s.enforceDailyQuota(ctx, userID, []string{featureCategorize, featureChat}, freeChatMonthlyLimit, "Free plan includes 20 AI chat prompts per month. Upgrade to Pro for 300 prompts/month"); err != nil {
 		return dto.CategorizeResponse{}, err
 	}
 	cats := s.resolveCategories(userID, req.UserCategories)
-	now := time.Now()
+	now := requestReferenceTime(req.ReferenceDate, req.Timezone)
 	today := now.Format("2006-01-02")
 	yesterday := now.AddDate(0, 0, -1).Format("2006-01-02")
 	tomorrow := now.AddDate(0, 0, 1).Format("2006-01-02")
@@ -249,6 +248,10 @@ GENERAL RULES:
    "menggunakan", "pake" = "pakai", "rb" = "ribu".
 6. NEVER merge multiple distinct purchases into one transaction.
 7. NEVER invent transactions that are not in the text.
+8. If the user mentions a recurring schedule ("setiap bulan", "mingguan",
+   "monthly", "every month", "recurring"), still extract the current
+   transaction normally and add "recurring_hint" with the schedule phrase.
+   Do not create extra future transactions.
 
 Text:
 """
@@ -258,7 +261,7 @@ Text:
 Return ONLY this JSON shape (no markdown, no commentary):
 {
   "transactions": [
-    {"amount": number, "merchant_name": string, "category": string, "type": "income"|"expense", "confidence": 0..1, "description": string, "date": "YYYY-MM-DD", "wallet_hint": string}
+    {"amount": number, "merchant_name": string, "category": string, "type": "income"|"expense", "confidence": 0..1, "description": string, "date": "YYYY-MM-DD", "wallet_hint": string, "recurring_hint": string}
   ]
 }`,
 		descriptionLanguage, today, today, yesterday, tomorrow, today, strings.Join(cats, ", "), req.Text)
@@ -337,14 +340,15 @@ func extractCategorizeItems(parsed map[string]any) []dto.CategorizeItem {
 			continue
 		}
 		item := dto.CategorizeItem{
-			Amount:       getNumber(obj, "amount"),
-			MerchantName: getString(obj, "merchant_name"),
-			Category:     firstString(obj, "category", "kategori"),
-			Type:         normalizeType(getString(obj, "type")),
-			Confidence:   getNumber(obj, "confidence"),
-			Description:  getString(obj, "description"),
-			Date:         firstString(obj, "date", "transaction_date"),
-			WalletHint:   firstString(obj, "wallet_hint", "wallet", "dompet", "rekening"),
+			Amount:        getNumber(obj, "amount"),
+			MerchantName:  getString(obj, "merchant_name"),
+			Category:      firstString(obj, "category", "kategori"),
+			Type:          normalizeType(getString(obj, "type")),
+			Confidence:    getNumber(obj, "confidence"),
+			Description:   getString(obj, "description"),
+			Date:          firstString(obj, "date", "transaction_date"),
+			WalletHint:    firstString(obj, "wallet_hint", "wallet", "dompet", "rekening"),
+			RecurringHint: firstString(obj, "recurring_hint", "recurring", "schedule"),
 		}
 		if item.Amount <= 0 && item.MerchantName == "" && item.Category == "" {
 			continue
@@ -365,7 +369,7 @@ func normalizeCategorizeItems(items []dto.CategorizeItem, allowed []string) []dt
 }
 
 func (s *service) ScanReceipt(ctx context.Context, userID uuid.UUID, req dto.ScanReceiptRequest) (dto.ScanReceiptResponse, error) {
-	if err := s.enforceDailyQuota(ctx, userID, []string{featureScanReceipt}, freeScanReceiptDailyLimit, "Free plan can scan receipts up to 3 times per day. Upgrade to Pro for unlimited receipt scanning"); err != nil {
+	if err := s.enforceDailyQuota(ctx, userID, []string{featureScanReceipt}, freeScanReceiptMonthlyLimit, "Free plan includes 10 OCR scans per month. Upgrade to Pro for 100 scans/month"); err != nil {
 		return dto.ScanReceiptResponse{}, err
 	}
 	cats := s.resolveCategories(userID, req.UserCategories)
@@ -658,10 +662,11 @@ Return ONLY this JSON:
 }
 
 func (s *service) Chat(ctx context.Context, userID uuid.UUID, req dto.ChatRequest) (dto.ChatResponse, error) {
-	if err := s.enforceDailyQuota(ctx, userID, []string{featureCategorize, featureChat}, freeChatDailyLimit, "Free plan can use Chat with AI up to 5 times per day. Upgrade to Pro for unlimited AI chat"); err != nil {
+	if err := s.enforceDailyQuota(ctx, userID, []string{featureCategorize, featureChat}, freeChatMonthlyLimit, "Free plan includes 20 AI chat prompts per month. Upgrade to Pro for 300 prompts/month"); err != nil {
 		return dto.ChatResponse{}, err
 	}
 	lang := preferredLanguage(req.Message, req.Language)
+	referenceNow := requestReferenceTime(req.ReferenceDate, req.Timezone)
 	if isHelpMessage(req.Message) {
 		reply := localizedChatHelp(lang)
 		s.record(userID, aiLogEntry{Feature: featureChat, Status: "success", LatencyMs: 0, Raw: map[string]any{"message": req.Message, "reply": reply, "session_id": req.SessionID}})
@@ -673,7 +678,7 @@ func (s *service) Chat(ctx context.Context, userID uuid.UUID, req dto.ChatReques
 		return dto.ChatResponse{Reply: reply}, nil
 	}
 	if isTodayExpenseQuestion(req.Message) {
-		now := time.Now()
+		now := referenceNow
 		todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 		rows, _, err := s.txns.List(transaction.ListFilter{UserID: userID, From: &todayStart, To: &now, Page: 1, Limit: 200})
 		if err != nil {
@@ -706,7 +711,7 @@ func (s *service) Chat(ctx context.Context, userID uuid.UUID, req dto.ChatReques
 	var promptBuilder strings.Builder
 
 	if req.IncludeContext {
-		to := time.Now()
+		to := referenceNow
 		from := to.AddDate(0, -1, 0)
 		todayStart := time.Date(to.Year(), to.Month(), to.Day(), 0, 0, 0, 0, to.Location())
 		monthStart := time.Date(to.Year(), to.Month(), 1, 0, 0, 0, 0, to.Location())
@@ -723,11 +728,50 @@ func (s *service) Chat(ctx context.Context, userID uuid.UUID, req dto.ChatReques
 			UserID: userID, Page: 1, Limit: 1000,
 		})
 		promptBuilder.WriteString(fmt.Sprintf("Exact date context:\n- today=%s\n- current_month=%s\n", todayStart.Format("2006-01-02"), monthStart.Format("2006-01")))
+		if date, ok := extractSpecificDate(req.Message, referenceNow); ok {
+			dayStart := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
+			dayEnd := dayStart.Add(24*time.Hour - time.Nanosecond)
+			dateRows, dateTotal, dateErr := s.txns.List(transaction.ListFilter{
+				UserID: userID, From: &dayStart, To: &dayEnd, Page: 1, Limit: 500,
+			})
+			if dateErr == nil {
+				income, expense, byCat := summarise(dateRows)
+				promptBuilder.WriteString(fmt.Sprintf("- requested_date=%s, requested_date_transactions=%d, requested_date_total_rows=%d, requested_date_income=%.2f, requested_date_expense=%.2f, requested_date_top_expense_categories=%s\n",
+					dayStart.Format("2006-01-02"), len(dateRows), dateTotal, income, expense, topCategoriesString(byCat, 5)))
+				if len(dateRows) > 0 {
+					promptBuilder.WriteString("- requested_date_transaction_rows:\n")
+					promptBuilder.WriteString(sampleRowsString(dateRows, 80))
+					promptBuilder.WriteString("\n")
+				}
+			}
+		}
 		if s.wallets != nil {
 			if walletRows, walletErr := s.wallets.List(userID); walletErr == nil && len(walletRows) > 0 {
 				promptBuilder.WriteString("Wallet context:\n")
 				promptBuilder.WriteString(walletContextString(walletRows))
 				promptBuilder.WriteString("\n")
+				if isListTransactionsQuestion(req.Message) {
+					walletLookupText := req.Message + "\n" + chatHistoryText(req.History, 4)
+					if matchedWallet := matchWalletFromMessage(walletLookupText, walletRows); matchedWallet != nil {
+						walletTxRows, walletTotal, walletTxErr := s.txns.List(transaction.ListFilter{
+							UserID: userID, WalletID: &matchedWallet.ID, Page: 1, Limit: 5000,
+						})
+						if walletTxErr == nil {
+							income, expense, byCat := summarise(walletTxRows)
+							promptBuilder.WriteString(fmt.Sprintf("Full wallet transaction context for %q:\n- wallet_total_transactions=%d\n- loaded_wallet_transactions=%d\n- wallet_income=%.2f, wallet_expense=%.2f\n- wallet_top_expense_categories=%s\n- wallet_transaction_rows:\n%s\n\n",
+								matchedWallet.Name, walletTotal, len(walletTxRows), income, expense, topCategoriesString(byCat, 8), sampleRowsString(walletTxRows, 5000)))
+						}
+					} else if wantsAllTransactions(req.Message) {
+						allListRows, allListTotal, allListErr := s.txns.List(transaction.ListFilter{
+							UserID: userID, Page: 1, Limit: 5000,
+						})
+						if allListErr == nil {
+							income, expense, byCat := summarise(allListRows)
+							promptBuilder.WriteString(fmt.Sprintf("Full all-transaction list context:\n- total_transactions=%d\n- loaded_transactions=%d\n- income=%.2f, expense=%.2f\n- top_expense_categories=%s\n- transaction_rows:\n%s\n\n",
+								allListTotal, len(allListRows), income, expense, topCategoriesString(byCat, 12), sampleRowsString(allListRows, 5000)))
+						}
+					}
+				}
 			}
 		}
 		if todayErr == nil {
@@ -822,7 +866,7 @@ func preferredLanguage(message, requested string) string {
 	}
 	m := strings.ToLower(strings.TrimSpace(message))
 	englishHints := []string{"what", "which", "how", "why", "total", "spending", "income", "expense", "budget", "wallet", "category", "compare", "summarize", "show", "list", "this month", "last month"}
-	indonesianHints := []string{"apa", "berapa", "mana", "bagaimana", "pengeluaran", "pemasukan", "dompet", "kategori", "bulan ini", "bulan lalu", "bandingkan", "ringkas", "tampilkan"}
+	indonesianHints := []string{"apa", "berapa", "mana", "bagaimana", "pengeluaran", "pemasukan", "dompet", "kategori", "bulan ini", "bulan lalu", "bandingkan", "ringkas", "tampilkan", "berikan", "semua", "transaksi", "transaksinya", "bukan", "cuma", "kemarin", "hari ini", "aja", "pakai", "pake", "menggunakan", "saldo", "sisa", "nominal", "jumlah", "rincian"}
 	englishScore := 0
 	indonesianScore := 0
 	for _, hint := range englishHints {
@@ -842,6 +886,87 @@ func preferredLanguage(message, requested string) string {
 		return "id"
 	}
 	return "en"
+}
+
+func requestReferenceTime(referenceDate, timezone string) time.Time {
+	loc := time.Local
+	if strings.TrimSpace(timezone) != "" {
+		if loaded, err := time.LoadLocation(strings.TrimSpace(timezone)); err == nil {
+			loc = loaded
+		}
+	}
+	value := strings.TrimSpace(referenceDate)
+	if value == "" {
+		return time.Now().In(loc)
+	}
+	if parsed, err := time.ParseInLocation("2006-01-02", value, loc); err == nil {
+		now := time.Now().In(loc)
+		return time.Date(parsed.Year(), parsed.Month(), parsed.Day(), now.Hour(), now.Minute(), now.Second(), now.Nanosecond(), loc)
+	}
+	if parsed, err := time.Parse(time.RFC3339, value); err == nil {
+		return parsed.In(loc)
+	}
+	return time.Now().In(loc)
+}
+
+var specificDateRE = regexp.MustCompile(`(?i)(?:tanggal|tgl|date|on)\s+(\d{1,2})(?:[-/\s]+([a-zA-Z]+|\d{1,2}))?(?:[-/\s]+(\d{2,4}))?`)
+
+func extractSpecificDate(message string, reference time.Time) (time.Time, bool) {
+	text := strings.ToLower(strings.TrimSpace(message))
+	match := specificDateRE.FindStringSubmatch(text)
+	if len(match) < 2 {
+		return time.Time{}, false
+	}
+	day, err := strconv.Atoi(match[1])
+	if err != nil || day < 1 || day > 31 {
+		return time.Time{}, false
+	}
+	month := int(reference.Month())
+	year := reference.Year()
+	if len(match) > 2 && strings.TrimSpace(match[2]) != "" {
+		if parsedMonth, ok := parseMonthToken(match[2]); ok {
+			month = parsedMonth
+		}
+	}
+	if len(match) > 3 && strings.TrimSpace(match[3]) != "" {
+		if parsedYear, yerr := strconv.Atoi(match[3]); yerr == nil {
+			if parsedYear < 100 {
+				parsedYear += 2000
+			}
+			year = parsedYear
+		}
+	}
+	date := time.Date(year, time.Month(month), day, 0, 0, 0, 0, reference.Location())
+	if date.Month() != time.Month(month) || date.Day() != day {
+		return time.Time{}, false
+	}
+	return date, true
+}
+
+func parseMonthToken(token string) (int, bool) {
+	t := strings.ToLower(strings.Trim(token, " .,/"))
+	if t == "" {
+		return 0, false
+	}
+	if n, err := strconv.Atoi(t); err == nil && n >= 1 && n <= 12 {
+		return n, true
+	}
+	months := map[string]int{
+		"jan": 1, "januari": 1, "january": 1,
+		"feb": 2, "februari": 2, "february": 2,
+		"mar": 3, "maret": 3, "march": 3,
+		"apr": 4, "april": 4,
+		"mei": 5, "may": 5,
+		"jun": 6, "juni": 6, "june": 6,
+		"jul": 7, "juli": 7, "july": 7,
+		"agu": 8, "agustus": 8, "aug": 8, "august": 8,
+		"sep": 9, "sept": 9, "september": 9,
+		"okt": 10, "oktober": 10, "oct": 10, "october": 10,
+		"nov": 11, "november": 11,
+		"des": 12, "desember": 12, "dec": 12, "december": 12,
+	}
+	value, ok := months[t]
+	return value, ok
 }
 
 func localizedChatHelp(lang string) string {
@@ -908,6 +1033,37 @@ func isWalletStartingBalanceQuestion(message string) bool {
 	hasStart := strings.Contains(text, "saldo awal") || strings.Contains(text, "awalnya") || strings.Contains(text, "modal awal") || strings.Contains(text, "starting balance") || strings.Contains(text, "initial balance")
 	hasResult := strings.Contains(text, "sisa") || strings.Contains(text, "saldo") || strings.Contains(text, "remaining") || strings.Contains(text, "balance")
 	return hasWalletIntent && hasStart && hasResult
+}
+
+func isListTransactionsQuestion(message string) bool {
+	text := strings.ToLower(strings.TrimSpace(message))
+	hasListIntent := strings.Contains(text, "list") || strings.Contains(text, "daftar") || strings.Contains(text, "tampilkan") || strings.Contains(text, "show") || strings.Contains(text, "rincian") || strings.Contains(text, "detail")
+	hasTxIntent := strings.Contains(text, "transaksi") || strings.Contains(text, "transactions") || strings.Contains(text, "pengeluaran") || strings.Contains(text, "expenses")
+	hasFollowUpAll := strings.Contains(text, "semua") || strings.Contains(text, "all") || strings.Contains(text, "bukan cuma") || strings.Contains(text, "bukan hanya")
+	return (hasListIntent && hasTxIntent) || (hasFollowUpAll && hasTxIntent)
+}
+
+func wantsAllTransactions(message string) bool {
+	text := strings.ToLower(strings.TrimSpace(message))
+	return strings.Contains(text, "semua") || strings.Contains(text, "all") || strings.Contains(text, "bukan cuma") || strings.Contains(text, "bukan hanya")
+}
+
+func chatHistoryText(history []dto.ChatTurn, maxTurns int) string {
+	if len(history) == 0 || maxTurns <= 0 {
+		return ""
+	}
+	start := len(history) - maxTurns
+	if start < 0 {
+		start = 0
+	}
+	parts := make([]string, 0, len(history)-start)
+	for _, turn := range history[start:] {
+		content := strings.TrimSpace(turn.Content)
+		if content != "" {
+			parts = append(parts, content)
+		}
+	}
+	return strings.Join(parts, "\n")
 }
 
 func matchWalletFromMessage(message string, wallets []domain.Wallet) *domain.Wallet {
