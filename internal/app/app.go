@@ -33,6 +33,7 @@ import (
 	"github.com/ganiramadhan/starter-go/internal/platform/cache"
 	"github.com/ganiramadhan/starter-go/internal/platform/database"
 	"github.com/ganiramadhan/starter-go/internal/platform/mailer"
+	"github.com/ganiramadhan/starter-go/internal/platform/monitoring"
 	"github.com/ganiramadhan/starter-go/internal/platform/storage"
 	"github.com/ganiramadhan/starter-go/internal/routes"
 	"github.com/ganiramadhan/starter-go/pkg/jwt"
@@ -152,7 +153,7 @@ func (a *App) initStorage() error {
 
 func (a *App) initHTTP() {
 	a.fiber = fiber.New(fiber.Config{
-		AppName:      "Starter Go API",
+		AppName:      "SAKU API",
 		BodyLimit:    10 * 1024 * 1024,
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
@@ -166,6 +167,10 @@ func (a *App) initHTTP() {
 		TimeFormat: "2006-01-02 15:04:05",
 	}))
 	a.fiber.Use(recover.New())
+	if strings.TrimSpace(a.cfg.Sentry.DSN) != "" {
+		a.fiber.Use(monitoring.NewFiberMiddleware())
+		a.fiber.Use(monitoring.EnrichFiberContext)
+	}
 	a.fiber.Use(middleware.SecurityHeaders())
 	a.fiber.Use(cors.New(cors.Config{
 		AllowOrigins:     a.cfg.CORS.AllowOrigins,
@@ -348,8 +353,12 @@ func (a *App) runReminderPass(
 			continue
 		}
 		daysLeft := daysUntilUTC(today, *due)
-		if daysLeft == 7 {
-			title := "Your SAKU subscription ends in 7 days"
+		if daysLeft == 7 || daysLeft == 3 || daysLeft == 1 {
+			dayLabel := "days"
+			if daysLeft == 1 {
+				dayLabel = "day"
+			}
+			title := fmt.Sprintf("Your SAKU subscription ends in %d %s", daysLeft, dayLabel)
 			message := fmt.Sprintf("Your %s subscription is active until %s. Renew or prepare payment so your Pro features stay available.", sub.Plan.Name, due.Format("02 Jan 2006"))
 			_ = notificationSvc.Create(ctx, domain.Notification{
 				UserID: sub.UserID, Type: "subscription_expiring_soon", Title: title, Message: message, RefType: "subscription", RefID: sub.ID.String(),

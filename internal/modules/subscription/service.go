@@ -20,9 +20,9 @@ import (
 const (
 	referralPaymentReward int64 = 2000
 	qrisPaymentExpiry           = 15 * time.Minute
-	gopayPaymentExpiry          = 15 * time.Minute
 	virtualAccountExpiry        = 24 * time.Hour
 	snapPageExpiry              = 1 * time.Hour
+	proLaunchDiscountRate       = 0.30
 )
 
 type Service interface {
@@ -131,23 +131,22 @@ func (s *service) ListPlans(_ context.Context) ([]dto.PlanResponse, error) {
 
 func (s *service) ValidateVoucher(_ context.Context, req dto.ValidateVoucherRequest) (*dto.ValidateVoucherResponse, error) {
 	req.Sanitize()
+	if strings.TrimSpace(req.VoucherCode) == "" {
+		return nil, fmt.Errorf("%w: voucher code is not valid", domain.ErrInvalidVoucher)
+	}
 	plan, err := s.repo.FindPlanByCode(req.PlanCode)
 	if err != nil {
 		return nil, err
 	}
-	discountAmount, voucher, err := s.resolveVoucherDiscount(req.VoucherCode, plan.Price, time.Now().UTC())
+	originalAmount, discountAmount, payAmount, voucher, err := s.calculateCheckoutAmounts(plan, req.VoucherCode, time.Now().UTC())
 	if err != nil {
 		return nil, err
-	}
-	payAmount := plan.Price - discountAmount
-	if payAmount < 1000 {
-		payAmount = 1000
 	}
 	return &dto.ValidateVoucherResponse{
 		Code:           voucher.Code,
 		DiscountType:   voucher.DiscountType,
 		DiscountValue:  voucher.DiscountValue,
-		OriginalAmount: plan.Price,
+		OriginalAmount: originalAmount,
 		DiscountAmount: discountAmount,
 		PayAmount:      payAmount,
 		Currency:       plan.Currency,
@@ -155,6 +154,7 @@ func (s *service) ValidateVoucher(_ context.Context, req dto.ValidateVoucherRequ
 }
 
 func (s *service) Checkout(ctx context.Context, userID uuid.UUID, req dto.CheckoutRequest) (*dto.CheckoutResponse, error) {
+	req.Sanitize()
 	plan, err := s.repo.FindPlanByCode(req.PlanCode)
 	if err != nil {
 		return nil, err
@@ -170,6 +170,22 @@ func (s *service) Checkout(ctx context.Context, userID uuid.UUID, req dto.Checko
 		} else {
 			if pending.PlanID != plan.ID {
 				return nil, fmt.Errorf("you already have a pending payment. Please cancel it before choosing another plan")
+			}
+			effectiveVoucherCode := req.VoucherCode
+			if strings.TrimSpace(effectiveVoucherCode) == "" {
+				effectiveVoucherCode = pending.VoucherCode
+			}
+			_, expectedDiscount, expectedAmount, _, err := s.calculateCheckoutAmounts(plan, effectiveVoucherCode, time.Now().UTC())
+			if err != nil {
+				return nil, err
+			}
+			if math.Round(pending.Amount) != math.Round(expectedAmount) || math.Round(pending.DiscountAmount) != math.Round(expectedDiscount) {
+				if s.midtrans != nil && strings.TrimSpace(pending.MidtransOrderID) != "" {
+					if err := s.midtrans.CancelTransaction(ctx, pending.MidtransOrderID); err != nil {
+						log.Printf("subscription: cancel superseded invoice failed order_id=%s: %v", pending.MidtransOrderID, err)
+					}
+				}
+				return s.createInvoice(ctx, pending, plan, effectiveVoucherCode)
 			}
 			if pending.SnapToken == "" || pending.SnapRedirectURL == "" || pending.PaymentStatus == domain.PaymentStatusExpired {
 				return s.createInvoice(ctx, pending, plan, req.VoucherCode)
@@ -273,14 +289,9 @@ func (s *service) createInvoice(ctx context.Context, sub *domain.Subscription, p
 		return nil, err
 	}
 	now := time.Now().UTC()
-	originalAmount := plan.Price
-	discountAmount, voucher, err := s.resolveVoucherDiscount(voucherCode, originalAmount, now)
+	originalAmount, discountAmount, chargeAmountFloat, voucher, err := s.calculateCheckoutAmounts(plan, voucherCode, now)
 	if err != nil {
 		return nil, err
-	}
-	chargeAmountFloat := originalAmount - discountAmount
-	if chargeAmountFloat < 1000 {
-		chargeAmountFloat = 1000
 	}
 	chargeAmount := int64(math.Round(chargeAmountFloat))
 	orderID := fmt.Sprintf("SAKU-%s-%s", strings.ToUpper(plan.Code), strings.ToUpper(strings.ReplaceAll(uuid.NewString()[:13], "-", "")))
@@ -417,6 +428,40 @@ func planDurationLabel(period string) string {
 	default:
 		return period
 	}
+}
+
+func (s *service) calculateCheckoutAmounts(plan *domain.Plan, voucherCode string, now time.Time) (float64, float64, float64, *domain.Voucher, error) {
+	if plan == nil {
+		return 0, 0, 0, nil, domain.ErrNotFound
+	}
+	originalAmount := plan.Price
+	launchDiscount := launchPromoDiscount(plan)
+	voucherBaseAmount := originalAmount - launchDiscount
+	if voucherBaseAmount < 0 {
+		voucherBaseAmount = 0
+	}
+	voucherDiscount, voucher, err := s.resolveVoucherDiscount(voucherCode, voucherBaseAmount, now)
+	if err != nil {
+		return 0, 0, 0, nil, err
+	}
+	discountAmount := launchDiscount + voucherDiscount
+	payAmount := originalAmount - discountAmount
+	if payAmount < 1000 {
+		payAmount = 1000
+	}
+	return originalAmount, discountAmount, payAmount, voucher, nil
+}
+
+func launchPromoDiscount(plan *domain.Plan) float64 {
+	if plan == nil {
+		return 0
+	}
+	code := strings.ToLower(strings.TrimSpace(plan.Code))
+	period := strings.ToLower(strings.TrimSpace(plan.Period))
+	if code != "pro" || period != domain.PlanPeriodMonthly {
+		return 0
+	}
+	return math.Round(plan.Price * proLaunchDiscountRate)
 }
 
 func subscriptionFeatureSummary(code string) []string {

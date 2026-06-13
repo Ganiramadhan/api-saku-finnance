@@ -179,14 +179,15 @@ type AIProcessingLog struct {
 }
 
 type SupportTicket struct {
-	ID        uuid.UUID `gorm:"type:uuid;primaryKey"`
-	UserID    uuid.UUID `gorm:"type:uuid;not null;index"`
-	Subject   string    `gorm:"type:varchar(180);not null"`
-	Category  string    `gorm:"type:varchar(64);not null"`
-	Priority  string    `gorm:"type:varchar(20);not null;default:'normal'"`
-	Status    string    `gorm:"type:varchar(24);not null;default:'open';index"`
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID         uuid.UUID `gorm:"type:uuid;primaryKey"`
+	TicketCode string    `gorm:"type:varchar(32);uniqueIndex"`
+	UserID     uuid.UUID `gorm:"type:uuid;not null;index"`
+	Subject    string    `gorm:"type:varchar(180);not null"`
+	Category   string    `gorm:"type:varchar(64);not null"`
+	Priority   string    `gorm:"type:varchar(20);not null;default:'normal'"`
+	Status     string    `gorm:"type:varchar(24);not null;default:'open';index"`
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 	DeletedAt gorm.DeletedAt `gorm:"index"`
 
 	User     *User            `gorm:"foreignKey:UserID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`

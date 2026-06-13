@@ -1,6 +1,8 @@
 package support
 
 import (
+	"fmt"
+
 	"github.com/ganiramadhan/starter-go/internal/domain"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -49,12 +51,27 @@ func (r *repository) Find(id uuid.UUID) (*domain.SupportTicket, error) {
 
 func (r *repository) Create(ticket *domain.SupportTicket, message *domain.SupportMessage) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
+		if ticket.TicketCode == "" {
+			code, err := nextTicketCode(tx)
+			if err != nil {
+				return err
+			}
+			ticket.TicketCode = code
+		}
 		if err := tx.Create(ticket).Error; err != nil {
 			return err
 		}
 		message.TicketID = ticket.ID
 		return tx.Create(message).Error
 	})
+}
+
+func nextTicketCode(tx *gorm.DB) (string, error) {
+	var seq int64
+	if err := tx.Raw("SELECT nextval('support_ticket_code_seq')").Scan(&seq).Error; err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("TICKET-%04d", seq), nil
 }
 
 func (r *repository) AddMessage(message *domain.SupportMessage, status string) error {

@@ -202,17 +202,19 @@ type SupportMessageResponse struct {
 }
 
 type SupportTicketResponse struct {
-	ID        uuid.UUID                `json:"id"`
-	UserID    uuid.UUID                `json:"user_id"`
-	UserName  string                   `json:"user_name,omitempty"`
-	UserEmail string                   `json:"user_email,omitempty"`
-	Subject   string                   `json:"subject"`
-	Category  string                   `json:"category"`
-	Priority  string                   `json:"priority"`
-	Status    string                   `json:"status"`
-	Messages  []SupportMessageResponse `json:"messages,omitempty"`
-	CreatedAt time.Time                `json:"created_at"`
-	UpdatedAt time.Time                `json:"updated_at"`
+	ID           uuid.UUID                `json:"id"`
+	TicketCode   string                   `json:"ticket_code"`
+	UserID       uuid.UUID                `json:"user_id"`
+	UserName     string                   `json:"user_name,omitempty"`
+	UserEmail    string                   `json:"user_email,omitempty"`
+	UserPhotoURL string                   `json:"user_photo_url,omitempty"`
+	Subject      string                   `json:"subject"`
+	Category     string                   `json:"category"`
+	Priority     string                   `json:"priority"`
+	Status       string                   `json:"status"`
+	Messages     []SupportMessageResponse `json:"messages,omitempty"`
+	CreatedAt    time.Time                `json:"created_at"`
+	UpdatedAt    time.Time                `json:"updated_at"`
 }
 
 type CreateBudgetRequest struct {

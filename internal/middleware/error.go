@@ -6,6 +6,7 @@ import (
 
 	"github.com/ganiramadhan/starter-go/internal/domain"
 	"github.com/ganiramadhan/starter-go/internal/dto"
+	"github.com/ganiramadhan/starter-go/internal/platform/monitoring"
 	"github.com/ganiramadhan/starter-go/pkg/httpx"
 	"github.com/gofiber/fiber/v2"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -77,6 +78,8 @@ func ErrorHandler(c *fiber.Ctx, err error) error {
 	if ve := httpx.ValidationFromCtx(c); ve != nil {
 		data = fiber.Map{"errors": ve.Errors}
 	}
+
+	monitoring.CaptureFiberError(c, err, code)
 
 	return c.Status(code).JSON(dto.APIResponse{
 		Status:  "error",

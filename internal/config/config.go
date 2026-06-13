@@ -23,6 +23,7 @@ type Config struct {
 	Midtrans  MidtransConfig
 	Mail      MailConfig
 	Telegram  TelegramConfig
+	Sentry    SentryConfig
 }
 
 type AppConfig struct {
@@ -103,6 +104,12 @@ type TelegramConfig struct {
 	WebhookSecret string
 }
 
+type SentryConfig struct {
+	DSN              string
+	Environment      string
+	TracesSampleRate float64
+}
+
 func Load() *Config {
 	loadEnvFile()
 
@@ -180,6 +187,11 @@ func Load() *Config {
 			BotToken:      os.Getenv("TELEGRAM_BOT_TOKEN"),
 			WebhookSecret: os.Getenv("TELEGRAM_WEBHOOK_SECRET"),
 		},
+		Sentry: SentryConfig{
+			DSN:              os.Getenv("SENTRY_DSN"),
+			Environment:      getEnvOrDefault("SENTRY_ENVIRONMENT", getEnvOrDefault("APP_ENV", "production")),
+			TracesSampleRate: getEnvFloatOrDefault("SENTRY_TRACES_SAMPLE_RATE", 0.05),
+		},
 	}
 }
 
@@ -236,6 +248,25 @@ func mustGetEnvInt(key string) int {
 	n, err := strconv.Atoi(v)
 	if err != nil {
 		log.Fatalf("config: invalid integer value for %s: %q", key, v)
+	}
+	return n
+}
+
+func getEnvFloatOrDefault(key string, defaultVal float64) float64 {
+	v := os.Getenv(key)
+	if v == "" {
+		return defaultVal
+	}
+	n, err := strconv.ParseFloat(v, 64)
+	if err != nil {
+		log.Printf("config: invalid float value for %s: %q, using %.2f", key, v, defaultVal)
+		return defaultVal
+	}
+	if n < 0 {
+		return 0
+	}
+	if n > 1 {
+		return 1
 	}
 	return n
 }

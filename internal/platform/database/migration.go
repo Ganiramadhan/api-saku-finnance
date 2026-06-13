@@ -100,7 +100,11 @@ func autoMigrate(db *gorm.DB) error {
 		db.Config.DisableForeignKeyConstraintWhenMigrating = prevFKAutoMigrate
 	}()
 
-	return db.AutoMigrate(
+	if err := db.Exec("CREATE SEQUENCE IF NOT EXISTS support_ticket_code_seq START WITH 1").Error; err != nil {
+		return err
+	}
+
+	if err := db.AutoMigrate(
 		&domain.User{},
 		&domain.UserPasswordHistory{},
 		&domain.UserOTP{},
@@ -125,7 +129,31 @@ func autoMigrate(db *gorm.DB) error {
 		&domain.Notification{},
 		&domain.SplitBill{},
 		&domain.SplitBillParticipant{},
-	)
+	); err != nil {
+		return err
+	}
+
+	return backfillSupportTicketCodes(db)
+}
+
+func backfillSupportTicketCodes(db *gorm.DB) error {
+	if err := db.Exec(`
+		UPDATE support_tickets
+		SET ticket_code = 'TICKET-' || LPAD(nextval('support_ticket_code_seq')::text, 4, '0')
+		WHERE COALESCE(ticket_code, '') = '';
+	`).Error; err != nil {
+		return err
+	}
+	return db.Exec(`
+		SELECT setval(
+			'support_ticket_code_seq',
+			GREATEST(
+				COALESCE((SELECT MAX(NULLIF(regexp_replace(ticket_code, '\D', '', 'g'), '')::bigint) FROM support_tickets), 0),
+				1
+			),
+			true
+		);
+	`).Error
 }
 
 func ensureIndexes(db *gorm.DB) error {

@@ -391,6 +391,10 @@ ANTHROPIC_API_KEY=your_claude_api_key
 MIDTRANS_SERVER_KEY=your_midtrans_server_key
 MIDTRANS_CLIENT_KEY=your_midtrans_client_key
 
+SENTRY_DSN=
+SENTRY_ENVIRONMENT=production
+SENTRY_TRACES_SAMPLE_RATE=0.05
+
 JWT_SECRET=super-secret-key
 ```
 

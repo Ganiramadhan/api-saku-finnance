@@ -122,10 +122,11 @@ func (s *service) UpdateStatus(ctx context.Context, id uuid.UUID, req dto.Update
 }
 
 func (s *service) ticketToResp(ctx context.Context, t domain.SupportTicket) dto.SupportTicketResponse {
-	userName, userEmail := "", ""
+	userName, userEmail, userPhotoURL := "", "", ""
 	if t.User != nil {
 		userName = t.User.Name
 		userEmail = t.User.Email
+		userPhotoURL = s.userPhotoURL(ctx, t.User.Photo)
 	}
 	messages := make([]dto.SupportMessageResponse, 0, len(t.Messages))
 	for _, msg := range t.Messages {
@@ -142,10 +143,39 @@ func (s *service) ticketToResp(ctx context.Context, t domain.SupportTicket) dto.
 		})
 	}
 	return dto.SupportTicketResponse{
-		ID: t.ID, UserID: t.UserID, UserName: userName, UserEmail: userEmail, Subject: t.Subject,
+		ID: t.ID, TicketCode: supportTicketCode(t), UserID: t.UserID, UserName: userName, UserEmail: userEmail, UserPhotoURL: userPhotoURL, Subject: t.Subject,
 		Category: t.Category, Priority: t.Priority, Status: t.Status, Messages: messages,
 		CreatedAt: t.CreatedAt, UpdatedAt: t.UpdatedAt,
 	}
+}
+
+func supportTicketCode(t domain.SupportTicket) string {
+	if strings.TrimSpace(t.TicketCode) != "" {
+		return t.TicketCode
+	}
+	raw := strings.ToUpper(strings.ReplaceAll(t.ID.String(), "-", ""))
+	if len(raw) > 8 {
+		raw = raw[:8]
+	}
+	return "TICKET-" + raw
+}
+
+func (s *service) userPhotoURL(ctx context.Context, photo string) string {
+	photo = strings.TrimSpace(photo)
+	if photo == "" {
+		return ""
+	}
+	if strings.HasPrefix(photo, "http://") || strings.HasPrefix(photo, "https://") {
+		return photo
+	}
+	if s.storage == nil {
+		return ""
+	}
+	url, err := s.storage.PresignedURL(ctx, photo, supportAttachmentURLTTL)
+	if err != nil {
+		return ""
+	}
+	return url
 }
 
 func applySupportAttachment(message *domain.SupportMessage, key, name, contentType string) {
