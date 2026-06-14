@@ -2,9 +2,12 @@ package telegram
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"math"
+	"mime"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -86,7 +89,7 @@ func (s *service) HandleUpdate(ctx context.Context, update Update) error {
 	}
 	chatID := update.Message.Chat.ID
 	text := strings.TrimSpace(update.Message.Text)
-	if chatID == 0 || text == "" {
+	if chatID == 0 {
 		return nil
 	}
 
@@ -97,6 +100,21 @@ func (s *service) HandleUpdate(ctx context.Context, update Update) error {
 			return s.bot.SendMessage(ctx, chatID, unboundMessage(chatIDText))
 		}
 		return err
+	}
+	s.rememberTelegramUsername(chatIDText, update.Message.From, update.Message.Chat)
+
+	if fileID, fileName := receiptImageFile(*update.Message); fileID != "" {
+		caption := strings.TrimSpace(update.Message.Caption)
+		reply, err := s.buildReceiptPreview(ctx, u.ID, fileID, fileName, caption)
+		if err != nil {
+			return s.bot.SendMessage(ctx, chatID, friendlyReceiptError(err))
+		}
+		s.setPending(chatID, reply)
+		return s.bot.SendMessage(ctx, chatID, renderPreview(reply), WithInlineKeyboard(confirmKeyboard()))
+	}
+
+	if text == "" {
+		return nil
 	}
 
 	lower := strings.ToLower(text)
@@ -140,6 +158,76 @@ func (s *service) HandleUpdate(ctx context.Context, update Update) error {
 	return s.bot.SendMessage(ctx, chatID, renderPreview(preview), WithInlineKeyboard(confirmKeyboard()))
 }
 
+func (s *service) buildReceiptPreview(ctx context.Context, userID uuid.UUID, fileID, fileName, caption string) (pendingPreview, error) {
+	if s.bot == nil {
+		return pendingPreview{}, errors.New("telegram bot is not configured")
+	}
+	file, err := s.bot.GetFile(ctx, fileID)
+	if err != nil {
+		return pendingPreview{}, err
+	}
+	data, mediaType, err := s.bot.DownloadFile(ctx, file.FilePath)
+	if err != nil {
+		return pendingPreview{}, err
+	}
+	if len(data) == 0 {
+		return pendingPreview{}, errors.New("telegram image is empty")
+	}
+	mediaType = normalizeTelegramMediaType(mediaType, fallbackText(file.FilePath, fileName))
+	if !isSupportedReceiptMedia(mediaType) {
+		return pendingPreview{}, errors.New("unsupported receipt image")
+	}
+	out, err := s.ai.ScanReceipt(ctx, userID, dto.ScanReceiptRequest{
+		ImageBase64: base64.StdEncoding.EncodeToString(data),
+		MediaType:   mediaType,
+	})
+	if err != nil {
+		return pendingPreview{}, err
+	}
+	return s.previewFromReceipt(ctx, userID, out, caption)
+}
+
+func (s *service) previewFromReceipt(ctx context.Context, userID uuid.UUID, out dto.ScanReceiptResponse, caption string) (pendingPreview, error) {
+	if out.Amount <= 0 {
+		return pendingPreview{}, errors.New("receipt amount missing")
+	}
+	cats, err := s.categories.List(userID, "")
+	if err != nil {
+		return pendingPreview{}, err
+	}
+	wallets, err := s.wallets.List(userID)
+	if err != nil {
+		return pendingPreview{}, err
+	}
+	if len(wallets) == 0 {
+		return pendingPreview{}, errors.New("wallet required")
+	}
+	w := resolveWallet(wallets, caption)
+	c := resolveCategory(cats, out.Category, out.Type)
+	confidence := out.Confidence
+	description := fallbackText(out.Description, out.MerchantName, "Scan struk Telegram")
+	req := dto.CreateTransactionRequest{
+		WalletID:        w.ID,
+		CategoryID:      c.ID,
+		Amount:          out.Amount,
+		Type:            normalizeType(out.Type),
+		Description:     description,
+		MerchantName:    cleanMerchant(out.MerchantName),
+		TransactionDate: parseTransactionDate(out.Date),
+		Source:          domain.TxnSourceAPI,
+		ConfidenceScore: &confidence,
+	}
+	preview := pendingPreview{UserID: userID, CreatedAt: time.Now()}
+	preview.Items = append(preview.Items, pendingTransaction{
+		Request:      req,
+		WalletName:   w.Name,
+		CategoryName: c.Name,
+		Description:  description,
+	})
+	preview.Total = signedTotal(req.Type, req.Amount)
+	return preview, nil
+}
+
 func (s *service) handleCallback(ctx context.Context, callback CallbackQuery) error {
 	if callback.Message == nil {
 		return nil
@@ -153,6 +241,7 @@ func (s *service) handleCallback(ctx context.Context, callback CallbackQuery) er
 		}
 		return err
 	}
+	s.rememberTelegramUsername(chatIDText, &callback.From, callback.Message.Chat)
 	switch callback.Data {
 	case "saku:tx:confirm":
 		_ = s.bot.ClearInlineKeyboard(ctx, chatID, callback.Message.MessageID)
@@ -167,6 +256,23 @@ func (s *service) handleCallback(ctx context.Context, callback CallbackQuery) er
 		return s.bot.SendMessage(ctx, chatID, "Preview transaksi dibatalkan. Kirim ulang kalau mau dicatat lagi.")
 	default:
 		return nil
+	}
+}
+
+func (s *service) rememberTelegramUsername(chatID string, from *User, chat Chat) {
+	username := ""
+	if from != nil {
+		username = strings.TrimSpace(from.Username)
+	}
+	if username == "" {
+		username = strings.TrimSpace(chat.Username)
+	}
+	if username == "" {
+		return
+	}
+	if err := s.users.UpdateTelegramUsernameByChatID(chatID, username); err != nil {
+		// Non-critical profile metadata; do not fail the Telegram update.
+		return
 	}
 }
 
@@ -381,6 +487,52 @@ func containsAny(text string, values []string) bool {
 	return false
 }
 
+func receiptImageFile(message Message) (fileID, fileName string) {
+	if len(message.Photo) > 0 {
+		best := message.Photo[0]
+		bestScore := int64(best.Width * best.Height)
+		if best.FileSize > 0 {
+			bestScore = best.FileSize
+		}
+		for _, photo := range message.Photo[1:] {
+			score := int64(photo.Width * photo.Height)
+			if photo.FileSize > 0 {
+				score = photo.FileSize
+			}
+			if score > bestScore {
+				best = photo
+				bestScore = score
+			}
+		}
+		return best.FileID, "telegram-photo.jpg"
+	}
+	if message.Document != nil && strings.HasPrefix(strings.ToLower(message.Document.MimeType), "image/") {
+		return message.Document.FileID, message.Document.FileName
+	}
+	return "", ""
+}
+
+func normalizeTelegramMediaType(mediaType, fileName string) string {
+	mediaType = strings.TrimSpace(strings.Split(mediaType, ";")[0])
+	if mediaType == "" || mediaType == "application/octet-stream" {
+		mediaType = mime.TypeByExtension(strings.ToLower(filepath.Ext(fileName)))
+		mediaType = strings.TrimSpace(strings.Split(mediaType, ";")[0])
+	}
+	if mediaType == "image/jpg" {
+		return "image/jpeg"
+	}
+	return mediaType
+}
+
+func isSupportedReceiptMedia(mediaType string) bool {
+	switch mediaType {
+	case "image/jpeg", "image/png", "image/webp":
+		return true
+	default:
+		return false
+	}
+}
+
 func resolveWallet(wallets []domain.Wallet, hint string) domain.Wallet {
 	if len(wallets) == 0 {
 		return domain.Wallet{}
@@ -572,4 +724,21 @@ func friendlyChatError(err error) string {
 		return "Kuota AI bulanan kamu sudah habis. Upgrade ke Pro atau Premium supaya bisa lanjut bertanya soal cashflow dan transaksi dari Telegram."
 	}
 	return "Maaf, aku belum bisa mengambil ringkasan data SAKU kamu sekarang. Coba ulang sebentar lagi, atau cek langsung dari dashboard web."
+}
+
+func friendlyReceiptError(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "unsupported receipt image") {
+		return "Format gambar belum didukung. Kirim foto struk dalam format JPG, PNG, atau WebP ya."
+	}
+	if strings.Contains(msg, "amount missing") {
+		return "Aku belum bisa membaca nominal dari struk itu. Coba kirim foto yang lebih jelas atau scan dari aplikasi SAKU."
+	}
+	if strings.Contains(msg, "exceeds 8mb") {
+		return "Ukuran gambar terlalu besar. Coba kirim foto struk yang lebih ringan, maksimal 8 MB."
+	}
+	return friendlyError(err)
 }

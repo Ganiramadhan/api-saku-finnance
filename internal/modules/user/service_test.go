@@ -193,12 +193,23 @@ func (r *fakeRepo) BindTelegramChatID(userID uuid.UUID, chatID string) error {
 	return nil
 }
 
+func (r *fakeRepo) UpdateTelegramUsernameByChatID(chatID, username string) error {
+	for _, u := range r.users {
+		if u.TelegramChatID != nil && *u.TelegramChatID == chatID {
+			u.TelegramUsername = &username
+			return nil
+		}
+	}
+	return nil
+}
+
 func (r *fakeRepo) DisconnectTelegram(userID uuid.UUID) error {
 	u, ok := r.users[userID]
 	if !ok {
 		return domain.ErrNotFound
 	}
 	u.TelegramChatID = nil
+	u.TelegramUsername = nil
 	return nil
 }
 

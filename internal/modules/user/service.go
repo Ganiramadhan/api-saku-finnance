@@ -29,6 +29,7 @@ type Service interface {
 	Get(ctx context.Context, id uuid.UUID) (*dto.UserResponse, error)
 	Create(ctx context.Context, req dto.CreateUserRequest) (*dto.UserResponse, error)
 	Update(ctx context.Context, id uuid.UUID, req dto.UpdateUserRequest) (*dto.UserResponse, error)
+	ChangeEmail(ctx context.Context, id uuid.UUID, req dto.ChangeEmailRequest) (*dto.UserResponse, error)
 	Delete(ctx context.Context, id uuid.UUID) error
 	DeletePhoto(ctx context.Context, id uuid.UUID) (*dto.UserResponse, error)
 	BindTelegram(ctx context.Context, id uuid.UUID, req dto.BindTelegramRequest) (*dto.UserResponse, error)
@@ -192,6 +193,29 @@ func (s *service) Update(ctx context.Context, id uuid.UUID, req dto.UpdateUserRe
 	return &r, nil
 }
 
+func (s *service) ChangeEmail(ctx context.Context, id uuid.UUID, req dto.ChangeEmailRequest) (*dto.UserResponse, error) {
+	u, err := s.repo.FindByID(id)
+	if err != nil {
+		return nil, err
+	}
+	email := sanitizeEmail(req.Email)
+	if email == "" {
+		return nil, domain.ErrInvalidInput
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(u.Password), []byte(req.Password)); err != nil {
+		return nil, domain.ErrInvalidCredentials
+	}
+	if existing, _ := s.repo.FindByEmail(email); existing != nil && existing.ID != id {
+		return nil, domain.ErrAlreadyExists
+	}
+	u.Email = email
+	if err := s.repo.Update(u); err != nil {
+		return nil, err
+	}
+	r := s.toResponse(ctx, *u)
+	return &r, nil
+}
+
 func (s *service) Delete(ctx context.Context, id uuid.UUID) error {
 	u, err := s.repo.FindByID(id)
 	if err != nil {
@@ -277,6 +301,9 @@ func (s *service) toResponse(ctx context.Context, u domain.User) dto.UserRespons
 	if u.TelegramChatID != nil {
 		resp.TelegramChatID = *u.TelegramChatID
 	}
+	if u.TelegramUsername != nil {
+		resp.TelegramUsername = *u.TelegramUsername
+	}
 	if u.Referral != nil {
 		resp.ReferralCode = u.Referral.Code
 		resp.ReferralReward = u.Referral.Reward
@@ -289,6 +316,10 @@ func (s *service) toResponse(ctx context.Context, u domain.User) dto.UserRespons
 		}
 	}
 	return resp
+}
+
+func sanitizeEmail(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
 }
 
 func buildUserPhotoKey(id uuid.UUID, srcKey string) string {

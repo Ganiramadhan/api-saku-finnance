@@ -163,11 +163,18 @@ func (s *service) Checkout(ctx context.Context, userID uuid.UUID, req dto.Checko
 		return nil, fmt.Errorf("plan %q is free and does not require checkout", plan.Code)
 	}
 	if pending, err := s.repo.FindPendingByUserID(userID); err == nil && pending != nil {
+		s.refreshPendingPaymentStatus(ctx, pending)
 		if s.expirePendingIfNeeded(ctx, pending, time.Now().UTC()) {
 			if err := s.repo.UpdateSubscription(pending); err != nil {
 				return nil, err
 			}
-		} else {
+		}
+		if pending.PaymentStatus == domain.PaymentStatusExpired {
+			pending.PlanID = plan.ID
+			pending.Plan = plan
+			return s.createInvoice(ctx, pending, plan, req.VoucherCode)
+		}
+		if pending.PaymentStatus == domain.PaymentStatusPending {
 			if pending.PlanID != plan.ID {
 				return nil, fmt.Errorf("you already have a pending payment. Please cancel it before choosing another plan")
 			}
@@ -405,6 +412,19 @@ func (s *service) createInvoice(ctx context.Context, sub *domain.Subscription, p
 		ClientKey:      s.clientKey,
 		IsProduction:   s.isProd,
 	}, nil
+}
+
+func (s *service) refreshPendingPaymentStatus(ctx context.Context, sub *domain.Subscription) {
+	if sub == nil || sub.PaymentStatus != domain.PaymentStatusPending || strings.TrimSpace(sub.MidtransOrderID) == "" {
+		return
+	}
+	payment, err := s.repo.FindPaymentByOrderID(sub.MidtransOrderID)
+	if err != nil {
+		return
+	}
+	if err := s.syncPaymentFromMidtrans(ctx, payment, sub); err != nil {
+		log.Printf("subscription: refresh pending midtrans status failed order_id=%s: %v", sub.MidtransOrderID, err)
+	}
 }
 
 func splitCustomerName(name string) (string, string) {

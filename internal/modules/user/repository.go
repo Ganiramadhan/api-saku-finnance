@@ -27,6 +27,7 @@ type Repository interface {
 	EnsureReferralCode(userID uuid.UUID, code string) (*domain.UserReferral, error)
 	AddReferralReward(id uuid.UUID, amount int64) error
 	BindTelegramChatID(userID uuid.UUID, chatID string) error
+	UpdateTelegramUsernameByChatID(chatID, username string) error
 	DisconnectTelegram(userID uuid.UUID) error
 	Delete(id uuid.UUID) error
 }
@@ -231,10 +232,24 @@ func (r *repository) BindTelegramChatID(userID uuid.UUID, chatID string) error {
 		Update("telegram_chat_id", chatID).Error
 }
 
+func (r *repository) UpdateTelegramUsernameByChatID(chatID, username string) error {
+	chatID = strings.TrimSpace(chatID)
+	username = strings.TrimPrefix(strings.TrimSpace(username), "@")
+	if chatID == "" || username == "" {
+		return nil
+	}
+	return r.db.Model(&domain.User{}).
+		Where("telegram_chat_id = ?", chatID).
+		Update("telegram_username", username).Error
+}
+
 func (r *repository) DisconnectTelegram(userID uuid.UUID) error {
 	return r.db.Model(&domain.User{}).
 		Where("id = ?", userID).
-		Update("telegram_chat_id", nil).Error
+		Updates(map[string]any{
+			"telegram_chat_id":  nil,
+			"telegram_username": nil,
+		}).Error
 }
 
 func (r *repository) Delete(id uuid.UUID) error {

@@ -30,22 +30,28 @@ type BindTelegramRequest struct {
 	ChatID string `json:"chat_id" validate:"required,max=64" example:"123456789"`
 }
 
+type ChangeEmailRequest struct {
+	Email    string `json:"email" validate:"required,email" example:"new@example.com"`
+	Password string `json:"password" validate:"required" example:"currentPassword123"`
+}
+
 type UserResponse struct {
-	ID             uuid.UUID  `json:"id" example:"550e8400-e29b-41d4-a716-446655440000"`
-	Name           string     `json:"name" example:"John Doe"`
-	Email          string     `json:"email" example:"john@example.com"`
-	Role           string     `json:"role" example:"user"`
-	AuthProvider   string     `json:"auth_provider,omitempty" example:"password"`
-	Phone          string     `json:"phone,omitempty" example:"+628123456789"`
-	Status         string     `json:"status,omitempty" example:"active"`
-	Photo          string     `json:"photo,omitempty" example:"users/<uuid>/avatar.png"`
-	PhotoURL       string     `json:"photo_url,omitempty" example:"https://minio.local/starter/users/<uuid>/avatar.png?X-Amz-..."`
-	ReferralCode   string     `json:"referral_code,omitempty" example:"SAKU1A2B3C4D"`
-	ReferralReward int64      `json:"referral_reward,omitempty" example:"2000"`
-	TelegramChatID string     `json:"telegram_chat_id,omitempty" example:"123456789"`
-	LastLoginAt    *time.Time `json:"last_login_at,omitempty"`
-	CreatedAt      time.Time  `json:"created_at,omitempty"`
-	UpdatedAt      time.Time  `json:"updated_at,omitempty"`
+	ID               uuid.UUID  `json:"id" example:"550e8400-e29b-41d4-a716-446655440000"`
+	Name             string     `json:"name" example:"John Doe"`
+	Email            string     `json:"email" example:"john@example.com"`
+	Role             string     `json:"role" example:"user"`
+	AuthProvider     string     `json:"auth_provider,omitempty" example:"password"`
+	Phone            string     `json:"phone,omitempty" example:"+628123456789"`
+	Status           string     `json:"status,omitempty" example:"active"`
+	Photo            string     `json:"photo,omitempty" example:"users/<uuid>/avatar.png"`
+	PhotoURL         string     `json:"photo_url,omitempty" example:"https://minio.local/starter/users/<uuid>/avatar.png?X-Amz-..."`
+	ReferralCode     string     `json:"referral_code,omitempty" example:"SAKU1A2B3C4D"`
+	ReferralReward   int64      `json:"referral_reward,omitempty" example:"2000"`
+	TelegramChatID   string     `json:"telegram_chat_id,omitempty" example:"123456789"`
+	TelegramUsername string     `json:"telegram_username,omitempty" example:"gani_ramadhan"`
+	LastLoginAt      *time.Time `json:"last_login_at,omitempty"`
+	CreatedAt        time.Time  `json:"created_at,omitempty"`
+	UpdatedAt        time.Time  `json:"updated_at,omitempty"`
 }
 
 type UploadResponse struct {

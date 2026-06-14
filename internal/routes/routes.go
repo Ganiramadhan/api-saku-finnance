@@ -79,6 +79,7 @@ func Register(app *fiber.App, h Handlers, jwtMgr *jwt.Manager) {
 	usersMe := v1.Group("/users", authRequired)
 	usersMe.Get("/me", h.User.Me)
 	usersMe.Put("/me", h.User.UpdateMe)
+	usersMe.Put("/me/email", h.User.ChangeEmail)
 	usersMe.Post("/me/telegram", h.User.BindTelegram)
 	usersMe.Delete("/me/telegram", h.User.DisconnectTelegram)
 	usersMe.Delete("/me", h.User.DeleteMe)

@@ -474,7 +474,9 @@ Return ONLY this JSON (no commentary, no markdown fences):
 		strings.Join(cats, ", "))
 
 	start := time.Now()
-	raw, err := s.claude.AskImage(ctx, systemPrompt, prompt, mediaType, req.ImageBase64)
+	scanCtx, scanCancel := context.WithTimeout(ctx, 75*time.Second)
+	raw, err := s.claude.AskImage(scanCtx, systemPrompt, prompt, mediaType, req.ImageBase64)
+	scanCancel()
 	latency := int(time.Since(start).Milliseconds())
 
 	if err != nil {
@@ -505,12 +507,18 @@ Return ONLY this JSON (no commentary, no markdown fences):
 	if s.storage != nil && req.ImageBase64 != "" {
 		if data, derr := base64.StdEncoding.DecodeString(req.ImageBase64); derr == nil && len(data) > 0 {
 			folder := fmt.Sprintf("Temp/AI/Scans/%s", userID.String())
-			if key, uerr := s.storage.UploadBytes(ctx, data, mediaType, folder, ""); uerr == nil {
+			uploadCtx, uploadCancel := context.WithTimeout(ctx, 4*time.Second)
+			if key, uerr := s.storage.UploadBytes(uploadCtx, data, mediaType, folder, ""); uerr == nil {
 				parsed["image_key"] = key
 				out.ImageKey = key
 			} else {
-				slog.Warn("ai: scan receipt image upload failed", "user_id", userID, "error", uerr)
+				if isTransientObjectStorageError(uerr) {
+					slog.Info("ai: scan receipt image upload skipped; object storage temporary error", "user_id", userID, "error", uerr)
+				} else {
+					slog.Warn("ai: scan receipt image upload failed", "user_id", userID, "error", uerr)
+				}
 			}
+			uploadCancel()
 		} else if derr != nil {
 			slog.Warn("ai: scan receipt base64 decode failed", "user_id", userID, "error", derr)
 		}
@@ -526,6 +534,18 @@ Return ONLY this JSON (no commentary, no markdown fences):
 		out.LogID = logID.String()
 	}
 	return out, nil
+}
+
+func isTransientObjectStorageError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "statuscode: 502") ||
+		strings.Contains(msg, "bad gateway") ||
+		strings.Contains(msg, "xml syntax error") ||
+		strings.Contains(msg, "exceeded maximum number of attempts") ||
+		strings.Contains(msg, "closed by </body>")
 }
 
 func (s *service) PromoteScanImage(ctx context.Context, userID uuid.UUID, req dto.PromoteScanImageRequest) (dto.PromoteScanImageResponse, error) {

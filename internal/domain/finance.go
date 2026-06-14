@@ -188,7 +188,7 @@ type SupportTicket struct {
 	Status     string    `gorm:"type:varchar(24);not null;default:'open';index"`
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
-	DeletedAt gorm.DeletedAt `gorm:"index"`
+	DeletedAt  gorm.DeletedAt `gorm:"index"`
 
 	User     *User            `gorm:"foreignKey:UserID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
 	Messages []SupportMessage `gorm:"foreignKey:TicketID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`

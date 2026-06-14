@@ -61,8 +61,35 @@ func (h *Handler) UpdateMe(c *fiber.Ctx) error {
 	if err := httpx.Bind(c, h.validator, &req); err != nil {
 		return err
 	}
-	req.Role = "" // prevent self-elevation
+	req.Role = ""  // prevent self-elevation
+	req.Email = "" // email changes require password via PUT /users/me/email
 	u, err := h.service.Update(c.Context(), uid, req)
+	if err != nil {
+		return err
+	}
+	return httpx.OK(c, constants.MsgUpdateUser, u)
+}
+
+// ChangeEmail godoc
+// @Summary   Change my email
+// @Description Updates the account email after verifying the current password.
+// @Tags      Users
+// @Accept    json
+// @Produce   json
+// @Param     request  body  dto.ChangeEmailRequest  true  "New email and current password"
+// @Success   200  {object}  dto.APIResponse{data=dto.UserResponse}
+// @Security  BearerAuth
+// @Router    /api/v1/users/me/email [put]
+func (h *Handler) ChangeEmail(c *fiber.Ctx) error {
+	uid, err := httpx.UserID(c)
+	if err != nil {
+		return err
+	}
+	var req dto.ChangeEmailRequest
+	if err := httpx.Bind(c, h.validator, &req); err != nil {
+		return err
+	}
+	u, err := h.service.ChangeEmail(c.Context(), uid, req)
 	if err != nil {
 		return err
 	}
