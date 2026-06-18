@@ -219,15 +219,24 @@ func (r *repository) ListActiveForReminder() ([]domain.Subscription, error) {
 }
 
 func (r *repository) ExpirePendingBefore(now time.Time) error {
-	legacyCutoff := now.Add(-snapPageExpiry)
-	return r.db.Model(&domain.Subscription{}).
-		Where("status = ? AND payment_status = ?", domain.SubscriptionStatusPending, domain.PaymentStatusPending).
-		Where("(payment_expires_at IS NOT NULL AND payment_expires_at <= ?) OR (payment_expires_at IS NULL AND created_at <= ?)", now, legacyCutoff).
-		Updates(map[string]any{
-			"payment_status":     domain.PaymentStatusExpired,
-			"payment_expired_at": now,
-			"next_billing_at":    nil,
-		}).Error
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&domain.SubscriptionPayment{}).
+			Where("status = ? AND expires_at IS NOT NULL AND expires_at <= ?", domain.PaymentStatusPending, now).
+			Updates(map[string]any{
+				"status":     domain.PaymentStatusExpired,
+				"expired_at": now,
+			}).Error; err != nil {
+			return err
+		}
+		return tx.Model(&domain.Subscription{}).
+			Where("status = ? AND payment_status = ?", domain.SubscriptionStatusPending, domain.PaymentStatusPending).
+			Where("payment_expires_at IS NOT NULL AND payment_expires_at <= ?", now).
+			Updates(map[string]any{
+				"payment_status":     domain.PaymentStatusExpired,
+				"payment_expired_at": now,
+				"next_billing_at":    nil,
+			}).Error
+	})
 }
 
 func (r *repository) CreatePayment(p *domain.SubscriptionPayment) error {

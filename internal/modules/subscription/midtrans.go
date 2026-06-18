@@ -58,6 +58,8 @@ type TransactionStatusResponse struct {
 	FraudStatus       string `json:"fraud_status"`
 	PaymentType       string `json:"payment_type"`
 	TransactionID     string `json:"transaction_id"`
+	TransactionTime   string `json:"transaction_time"`
+	ExpiryTime        string `json:"expiry_time"`
 }
 
 func (m *MidtransClient) CreateSnapTransaction(ctx context.Context, payload map[string]any) (*SnapResponse, error) {

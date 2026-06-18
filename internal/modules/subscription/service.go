@@ -267,6 +267,7 @@ func (s *service) RenewInvoice(ctx context.Context, userID, subscriptionID uuid.
 	if sub.Status != domain.SubscriptionStatusPending {
 		return nil, fmt.Errorf("invoice can only be renewed for pending subscriptions")
 	}
+	s.refreshPendingPaymentStatus(ctx, sub)
 	if s.expirePendingIfNeeded(ctx, sub, time.Now().UTC()) {
 		if err := s.repo.UpdateSubscription(sub); err != nil {
 			return nil, err
@@ -312,8 +313,6 @@ func (s *service) createInvoice(ctx context.Context, sub *domain.Subscription, p
 		durationLabel,
 		featureSummary,
 	)
-	paymentExpiresAt := now.Add(snapPageExpiry)
-
 	customerDetails := map[string]any{
 		"first_name": firstName,
 		"last_name":  lastName,
@@ -347,11 +346,6 @@ func (s *service) createInvoice(ctx context.Context, sub *domain.Subscription, p
 		"credit_card": map[string]any{
 			"secure": true,
 		},
-		"custom_expiry": map[string]any{
-			"order_time":      now.Format("2006-01-02 15:04:05 -0700"),
-			"expiry_duration": int(snapPageExpiry / time.Minute),
-			"unit":            "minute",
-		},
 	}
 
 	snap, err := s.midtrans.CreateSnapTransaction(ctx, payload)
@@ -368,7 +362,7 @@ func (s *service) createInvoice(ctx context.Context, sub *domain.Subscription, p
 	sub.SnapRedirectURL = snap.RedirectURL
 	sub.PaymentStatus = domain.PaymentStatusPending
 	sub.PaymentCreatedAt = &now
-	sub.PaymentExpiresAt = &paymentExpiresAt
+	sub.PaymentExpiresAt = nil
 	sub.PaymentPaidAt = nil
 	sub.PaymentExpiredAt = nil
 	sub.OriginalAmount = originalAmount
@@ -391,7 +385,7 @@ func (s *service) createInvoice(ctx context.Context, sub *domain.Subscription, p
 		Currency:       sub.Currency,
 		SnapToken:      snap.Token,
 		RedirectURL:    snap.RedirectURL,
-		ExpiresAt:      &paymentExpiresAt,
+		ExpiresAt:      nil,
 	}
 	if err := s.repo.CreatePayment(payment); err != nil {
 		return nil, err
@@ -403,7 +397,7 @@ func (s *service) createInvoice(ctx context.Context, sub *domain.Subscription, p
 		OrderID:        orderID,
 		SnapToken:      snap.Token,
 		RedirectURL:    snap.RedirectURL,
-		ExpiresAt:      sub.PaymentExpiresAt,
+		ExpiresAt:      nil,
 		PaymentStatus:  sub.PaymentStatus,
 		OriginalAmount: sub.OriginalAmount,
 		DiscountAmount: sub.DiscountAmount,
@@ -524,6 +518,7 @@ func (s *service) MySubscriptions(ctx context.Context, userID uuid.UUID) ([]dto.
 	now := time.Now().UTC()
 	for i := range rows {
 		r := rows[i]
+		s.refreshPendingPaymentStatus(ctx, &r)
 		if s.expirePendingIfNeeded(ctx, &r, now) {
 			if err := s.repo.UpdateSubscription(&r); err != nil {
 				return nil, err
@@ -691,77 +686,7 @@ func (s *service) HandleWebhook(_ context.Context, p dto.MidtransWebhook) error 
 	if sub == nil {
 		return domain.ErrNotFound
 	}
-
-	sub.MidtransTxnID = p.TransactionID
-	sub.MidtransPaymentType = p.PaymentType
-	payment.TransactionID = p.TransactionID
-	payment.PaymentType = p.PaymentType
-	wasActive := sub.Status == domain.SubscriptionStatusActive
-	fromPaymentStatus := payment.Status
-	now := time.Now().UTC()
-
-	switch p.TransactionStatus {
-	case "capture":
-		if p.FraudStatus == "challenge" {
-			payment.Status = domain.PaymentStatusPending
-			sub.PaymentStatus = domain.PaymentStatusPending
-		} else {
-			payment.Status = domain.PaymentStatusPaid
-			payment.PaidAt = &now
-			sub.PaymentStatus = domain.PaymentStatusPaid
-			sub.PaymentPaidAt = &now
-			s.activate(sub)
-		}
-	case "settlement":
-		payment.Status = domain.PaymentStatusPaid
-		payment.PaidAt = &now
-		sub.PaymentStatus = domain.PaymentStatusPaid
-		sub.PaymentPaidAt = &now
-		s.activate(sub)
-	case "pending":
-		payment.Status = domain.PaymentStatusPending
-		sub.PaymentStatus = domain.PaymentStatusPending
-		sub.Status = domain.SubscriptionStatusPending
-		expiresAt := payment.CreatedAt.UTC().Add(expiryForPaymentType(p.PaymentType))
-		payment.ExpiresAt = &expiresAt
-		sub.PaymentExpiresAt = &expiresAt
-	case "deny", "cancel", "expire":
-		if p.TransactionStatus == "expire" {
-			payment.Status = domain.PaymentStatusExpired
-			payment.ExpiredAt = &now
-			sub.PaymentStatus = domain.PaymentStatusExpired
-			sub.PaymentExpiredAt = &now
-			sub.Status = domain.SubscriptionStatusPending
-		} else if p.TransactionStatus == "cancel" {
-			payment.Status = domain.PaymentStatusCancelled
-			sub.PaymentStatus = domain.PaymentStatusCancelled
-			sub.Status = domain.SubscriptionStatusCancelled
-		} else {
-			payment.Status = domain.PaymentStatusFailed
-			sub.PaymentStatus = domain.PaymentStatusFailed
-		}
-	case "failure":
-		payment.Status = domain.PaymentStatusFailed
-		sub.PaymentStatus = domain.PaymentStatusFailed
-	}
-	if err := s.repo.UpdatePayment(payment); err != nil {
-		return err
-	}
-	if err := s.repo.UpdateSubscription(sub); err != nil {
-		return err
-	}
-	if fromPaymentStatus != payment.Status {
-		s.recordPaymentEvent(payment, fromPaymentStatus, payment.Status, "midtrans_"+p.TransactionStatus)
-	}
-	if !wasActive && sub.Status == domain.SubscriptionStatusActive {
-		if strings.TrimSpace(sub.VoucherCode) != "" && sub.DiscountAmount > 0 {
-			if err := s.repo.IncrementVoucherUsage(sub.VoucherCode); err != nil {
-				log.Printf("subscription: increment voucher usage failed code=%s: %v", sub.VoucherCode, err)
-			}
-		}
-		s.sendPaymentSuccessEmail(sub)
-	}
-	return nil
+	return s.applyMidtransStatus(payment, sub, p, "midtrans_"+p.TransactionStatus)
 }
 
 func (s *service) syncPaymentFromMidtrans(ctx context.Context, payment *domain.SubscriptionPayment, sub *domain.Subscription) error {
@@ -780,6 +705,8 @@ func (s *service) syncPaymentFromMidtrans(ctx context.Context, payment *domain.S
 		FraudStatus:       status.FraudStatus,
 		PaymentType:       status.PaymentType,
 		TransactionID:     status.TransactionID,
+		TransactionTime:   status.TransactionTime,
+		ExpiryTime:        status.ExpiryTime,
 	}
 	return s.applyMidtransStatus(payment, sub, p, "midtrans_status_"+p.TransactionStatus)
 }
@@ -818,9 +745,10 @@ func (s *service) applyMidtransStatus(payment *domain.SubscriptionPayment, sub *
 		payment.Status = domain.PaymentStatusPending
 		sub.PaymentStatus = domain.PaymentStatusPending
 		sub.Status = domain.SubscriptionStatusPending
-		expiresAt := payment.CreatedAt.UTC().Add(expiryForPaymentType(p.PaymentType))
-		payment.ExpiresAt = &expiresAt
-		sub.PaymentExpiresAt = &expiresAt
+		if expiresAt := midtransExpiryTime(p, payment.CreatedAt); expiresAt != nil {
+			payment.ExpiresAt = expiresAt
+			sub.PaymentExpiresAt = expiresAt
+		}
 	case "deny", "cancel", "expire":
 		if p.TransactionStatus == "expire" {
 			payment.Status = domain.PaymentStatusExpired
@@ -828,6 +756,10 @@ func (s *service) applyMidtransStatus(payment *domain.SubscriptionPayment, sub *
 			sub.PaymentStatus = domain.PaymentStatusExpired
 			sub.PaymentExpiredAt = &now
 			sub.Status = domain.SubscriptionStatusPending
+			if expiresAt := midtransExpiryTime(p, payment.CreatedAt); expiresAt != nil {
+				payment.ExpiresAt = expiresAt
+				sub.PaymentExpiresAt = expiresAt
+			}
 		} else if p.TransactionStatus == "cancel" {
 			payment.Status = domain.PaymentStatusCancelled
 			sub.PaymentStatus = domain.PaymentStatusCancelled
@@ -905,16 +837,16 @@ func (s *service) expirePendingIfNeeded(ctx context.Context, sub *domain.Subscri
 		return false
 	}
 	if sub.PaymentExpiresAt == nil {
-		deadline := sub.CreatedAt.UTC().Add(snapPageExpiry)
-		sub.PaymentExpiresAt = &deadline
+		return false
 	}
 	if now.Before(sub.PaymentExpiresAt.UTC()) {
 		return false
 	}
-	if s.midtrans != nil && strings.TrimSpace(sub.MidtransOrderID) != "" {
-		if err := s.midtrans.CancelTransaction(ctx, sub.MidtransOrderID); err != nil {
-			log.Printf("subscription: midtrans expire cancel failed order_id=%s: %v", sub.MidtransOrderID, err)
+	if payment, err := s.repo.FindPaymentByOrderID(sub.MidtransOrderID); err == nil && s.midtrans != nil && s.midtrans.Enabled() {
+		if err := s.syncPaymentFromMidtrans(ctx, payment, sub); err == nil {
+			return sub.PaymentStatus == domain.PaymentStatusExpired
 		}
+		log.Printf("subscription: midtrans expiry refresh failed order_id=%s", sub.MidtransOrderID)
 	}
 	sub.PaymentStatus = domain.PaymentStatusExpired
 	sub.PaymentExpiredAt = &now
@@ -944,6 +876,45 @@ func expiryForPaymentType(paymentType string) time.Duration {
 	default:
 		return snapPageExpiry
 	}
+}
+
+func midtransExpiryTime(p dto.MidtransWebhook, fallbackCreatedAt time.Time) *time.Time {
+	if parsed := parseMidtransTime(p.ExpiryTime); parsed != nil {
+		return parsed
+	}
+	base := fallbackCreatedAt.UTC()
+	if parsed := parseMidtransTime(p.TransactionTime); parsed != nil {
+		base = parsed.UTC()
+	}
+	if strings.TrimSpace(p.PaymentType) == "" {
+		return nil
+	}
+	expiresAt := base.Add(expiryForPaymentType(p.PaymentType))
+	return &expiresAt
+}
+
+func parseMidtransTime(value string) *time.Time {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
+		if parsed, err := time.Parse(layout, value); err == nil {
+			utc := parsed.UTC()
+			return &utc
+		}
+	}
+	location, err := time.LoadLocation("Asia/Jakarta")
+	if err != nil {
+		location = time.FixedZone("WIB", 7*60*60)
+	}
+	for _, layout := range []string{"2006-01-02 15:04:05", "2006-01-02 15:04:05 -0700"} {
+		if parsed, err := time.ParseInLocation(layout, value, location); err == nil {
+			utc := parsed.UTC()
+			return &utc
+		}
+	}
+	return nil
 }
 
 func (s *service) sendPaymentSuccessEmail(sub *domain.Subscription) {
