@@ -161,6 +161,14 @@ FOLLOW-UPS — IMPORTANT:
 - If the user asks for JSON or a list/table, output it cleanly (markdown allowed).
   Do NOT refuse just because the request mentions JSON / list / table.
 - NEVER hallucinate transactions. Only mention numbers that appear in the provided context or previous assistant message.
+- Treat exact summaries such as today_transactions, today_income, today_expense,
+  requested_date_transactions, and month_transactions as authoritative database
+  results. Never say there are no transactions when one of those values is above zero.
+- Lead with the direct answer and core number first. Then add at most one useful
+  interpretation or next action. Avoid formal filler such as "Berdasarkan data yang tersedia".
+- If the user asks for a count, include the count plus income, expense, and net
+  when those exact values are available. If there are transactions, mention up
+  to three recent examples so the answer is easy to verify.
 - Wallet-aware questions are common. If the user mentions a wallet, bank, e-wallet,
   "cash", "tunai", "dompet", "rekening", or asks remaining balance, use the wallet
   fields and wallet summaries in context. Do not say wallet data is unavailable when
@@ -261,6 +269,11 @@ GENERAL RULES:
    "monthly", "every month", "recurring"), still extract the current
    transaction normally and add "recurring_hint" with the schedule phrase.
    Do not create extra future transactions.
+9. If the text contains "Informasi lanjutan dari pengguna" or
+   "Additional detail from the user", the text after that label is a FOLLOW-UP
+   that completes the transaction context before it. Merge those details into
+   the incomplete transaction; do NOT create a separate transaction from the
+   follow-up answer.
 
 Text:
 """
@@ -324,6 +337,8 @@ Return ONLY this JSON shape (no markdown, no commentary):
 		}
 	}
 	out.NeedsReview = needsReview(out.Confidence, parsed == nil)
+	out.MissingFields, out.ClarificationQuestion = categorizeClarification(out, req.Text, lang)
+	out.NeedsClarification = len(out.MissingFields) > 0
 
 	s.logLowConfidence(featureCategorize, out.Confidence, parsed)
 	s.record(userID, aiLogEntry{
@@ -332,6 +347,44 @@ Return ONLY this JSON shape (no markdown, no commentary):
 		Amount: amountPtr(out.Amount), Raw: parsed,
 	})
 	return out, nil
+}
+
+func categorizeClarification(out dto.CategorizeResponse, input, language string) ([]string, string) {
+	if out.Amount > 0 {
+		return nil, ""
+	}
+
+	subject := strings.TrimSpace(out.MerchantName)
+	if subject == "" || subject == "-" {
+		if len(out.Transactions) > 0 {
+			subject = strings.TrimSpace(out.Transactions[0].Description)
+		}
+	}
+	if subject == "" {
+		subject = conciseTransactionSubject(input)
+	}
+
+	if language == "id" {
+		if subject != "" {
+			return []string{"amount"}, fmt.Sprintf("Nominal untuk %s berapa? Contoh: Rp 500.000.", subject)
+		}
+		return []string{"amount"}, "Nominal transaksinya berapa? Contoh: Rp 500.000."
+	}
+	if subject != "" {
+		return []string{"amount"}, fmt.Sprintf("How much was %s? For example: Rp 500,000.", subject)
+	}
+	return []string{"amount"}, "What was the transaction amount? For example: Rp 500,000."
+}
+
+func conciseTransactionSubject(input string) string {
+	cleaned := strings.TrimSpace(input)
+	cleaned = regexp.MustCompile(`(?i)^(tolong\s+)?(catat|bayar|beli|record|pay|paid)\s+`).ReplaceAllString(cleaned, "")
+	cleaned = strings.TrimSpace(strings.Trim(cleaned, ".,!?"))
+	words := strings.Fields(cleaned)
+	if len(words) > 8 {
+		words = words[:8]
+	}
+	return strings.Join(words, " ")
 }
 
 func extractCategorizeItems(parsed map[string]any) []dto.CategorizeItem {
@@ -714,15 +767,15 @@ func (s *service) Chat(ctx context.Context, userID uuid.UUID, req dto.ChatReques
 		s.record(userID, aiLogEntry{Feature: featureChat, Status: "success", LatencyMs: 0, Raw: map[string]any{"message": req.Message, "reply": reply, "refused": true, "session_id": req.SessionID}})
 		return dto.ChatResponse{Reply: reply}, nil
 	}
-	if isTodayExpenseQuestion(req.Message) {
+	if isTodayTransactionQuestion(req.Message) {
 		now := referenceNow
 		todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-		rows, _, err := s.txns.List(transaction.ListFilter{UserID: userID, From: &todayStart, To: &now, Page: 1, Limit: 200})
+		rows, total, err := s.listTransactionsForLocalDay(userID, todayStart, 5000)
 		if err != nil {
 			return dto.ChatResponse{}, err
 		}
-		reply := buildTodayExpenseAnswer(rows, lang, todayStart)
-		s.record(userID, aiLogEntry{Feature: featureChat, Status: "success", LatencyMs: 0, Raw: map[string]any{"message": req.Message, "reply": reply, "session_id": req.SessionID, "deterministic": true}})
+		reply := buildTodayTransactionAnswer(rows, total, lang, todayStart, isTodayExpenseQuestion(req.Message))
+		s.record(userID, aiLogEntry{Feature: featureChat, Status: "success", LatencyMs: 0, Raw: map[string]any{"message": req.Message, "reply": reply, "session_id": req.SessionID, "deterministic": true, "timezone": req.Timezone, "reference_date": req.ReferenceDate}})
 		return dto.ChatResponse{Reply: reply}, nil
 	}
 	if isWalletStartingBalanceQuestion(req.Message) && s.wallets != nil {
@@ -755,9 +808,7 @@ func (s *service) Chat(ctx context.Context, userID uuid.UUID, req dto.ChatReques
 		recentRows, _, err := s.txns.List(transaction.ListFilter{
 			UserID: userID, From: &from, To: &to, Page: 1, Limit: 100,
 		})
-		todayRows, _, todayErr := s.txns.List(transaction.ListFilter{
-			UserID: userID, From: &todayStart, To: &to, Page: 1, Limit: 200,
-		})
+		todayRows, _, todayErr := s.listTransactionsForLocalDay(userID, todayStart, 5000)
 		monthRows, _, monthErr := s.txns.List(transaction.ListFilter{
 			UserID: userID, From: &monthStart, To: &to, Page: 1, Limit: 500,
 		})
@@ -767,10 +818,7 @@ func (s *service) Chat(ctx context.Context, userID uuid.UUID, req dto.ChatReques
 		promptBuilder.WriteString(fmt.Sprintf("Exact date context:\n- today=%s\n- current_month=%s\n", todayStart.Format("2006-01-02"), monthStart.Format("2006-01")))
 		if date, ok := extractSpecificDate(req.Message, referenceNow); ok {
 			dayStart := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
-			dayEnd := dayStart.Add(24*time.Hour - time.Nanosecond)
-			dateRows, dateTotal, dateErr := s.txns.List(transaction.ListFilter{
-				UserID: userID, From: &dayStart, To: &dayEnd, Page: 1, Limit: 500,
-			})
+			dateRows, dateTotal, dateErr := s.listTransactionsForLocalDay(userID, dayStart, 5000)
 			if dateErr == nil {
 				income, expense, byCat := summarise(dateRows)
 				promptBuilder.WriteString(fmt.Sprintf("- requested_date=%s, requested_date_transactions=%d, requested_date_total_rows=%d, requested_date_income=%.2f, requested_date_expense=%.2f, requested_date_top_expense_categories=%s\n",
@@ -925,8 +973,45 @@ func preferredLanguage(message, requested string) string {
 	return "en"
 }
 
+func (s *service) listTransactionsForLocalDay(userID uuid.UUID, day time.Time, limit int) ([]domain.Transaction, int64, error) {
+	if limit <= 0 {
+		limit = 5000
+	}
+	start := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, day.Location())
+	// Query a wider UTC-safe window, then enforce the user's calendar date in
+	// application code. This handles local-midnight values stored on the prior
+	// UTC date without allowing tomorrow's transactions into today's summary.
+	from := start.UTC().Add(-24 * time.Hour)
+	to := start.AddDate(0, 0, 1).UTC().Add(24*time.Hour - time.Nanosecond)
+	rows, _, err := s.txns.List(transaction.ListFilter{
+		UserID: userID,
+		From:   &from,
+		To:     &to,
+		Page:   1,
+		Limit:  limit,
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	filtered := filterTransactionsForLocalDay(rows, start)
+	return filtered, int64(len(filtered)), nil
+}
+
+func filterTransactionsForLocalDay(rows []domain.Transaction, day time.Time) []domain.Transaction {
+	filtered := make([]domain.Transaction, 0, len(rows))
+	for _, row := range rows {
+		localDate := row.TransactionDate.In(day.Location())
+		if localDate.Year() == day.Year() &&
+			localDate.Month() == day.Month() &&
+			localDate.Day() == day.Day() {
+			filtered = append(filtered, row)
+		}
+	}
+	return filtered
+}
+
 func requestReferenceTime(referenceDate, timezone string) time.Time {
-	loc := time.Local
+	loc := defaultFinanceLocation()
 	if strings.TrimSpace(timezone) != "" {
 		if loaded, err := time.LoadLocation(strings.TrimSpace(timezone)); err == nil {
 			loc = loaded
@@ -944,6 +1029,13 @@ func requestReferenceTime(referenceDate, timezone string) time.Time {
 		return parsed.In(loc)
 	}
 	return time.Now().In(loc)
+}
+
+func defaultFinanceLocation() *time.Location {
+	if loc, err := time.LoadLocation("Asia/Jakarta"); err == nil {
+		return loc
+	}
+	return time.FixedZone("WIB", 7*60*60)
 }
 
 var specificDateRE = regexp.MustCompile(`(?i)(?:tanggal|tgl|date|on)\s+(\d{1,2})(?:[-/\s]+([a-zA-Z]+|\d{1,2}))?(?:[-/\s]+(\d{2,4}))?`)
@@ -1027,28 +1119,57 @@ func isTodayExpenseQuestion(message string) bool {
 	return hasExpenseIntent && hasTodayIntent
 }
 
-func buildTodayExpenseAnswer(rows []domain.Transaction, lang string, day time.Time) string {
+func isTodayTransactionQuestion(message string) bool {
+	text := strings.ToLower(strings.TrimSpace(message))
+	hasTodayIntent := strings.Contains(text, "hari ini") || strings.Contains(text, "today")
+	hasTransactionIntent := strings.Contains(text, "transaksi") ||
+		strings.Contains(text, "transaction") ||
+		strings.Contains(text, "pengeluaran") ||
+		strings.Contains(text, "expense") ||
+		strings.Contains(text, "spending") ||
+		strings.Contains(text, "pemasukan") ||
+		strings.Contains(text, "income")
+	return hasTodayIntent && hasTransactionIntent
+}
+
+func buildTodayTransactionAnswer(rows []domain.Transaction, totalRows int64, lang string, day time.Time, expenseOnly bool) string {
 	expenses := make([]domain.Transaction, 0, len(rows))
-	total := 0.0
+	totalExpense := 0.0
+	totalIncome := 0.0
 	byCat := map[string]float64{}
 	for _, row := range rows {
-		if row.Type != "expense" {
-			continue
+		if row.Type == "expense" {
+			expenses = append(expenses, row)
+			totalExpense += row.Amount
+			byCat[transactionCategoryName(row)] += row.Amount
+		} else if row.Type == "income" {
+			totalIncome += row.Amount
 		}
-		expenses = append(expenses, row)
-		total += row.Amount
-		byCat[transactionCategoryName(row)] += row.Amount
 	}
-	if len(expenses) == 0 {
+	dateLabel := formatChatDay(day, lang)
+	if totalRows == 0 {
 		if lang == "en" {
-			return fmt.Sprintf("You do not have any recorded expenses today (%s).", day.Format("2006-01-02"))
+			return fmt.Sprintf("No transactions are recorded for today (%s). Income: %s, spending: %s, net cashflow: %s.", dateLabel, formatRupiah(0), formatRupiah(0), formatRupiah(0))
 		}
-		return fmt.Sprintf("Belum ada pengeluaran yang tercatat hari ini (%s).", day.Format("2006-01-02"))
+		return fmt.Sprintf("Belum ada transaksi yang tercatat hari ini (%s). Pemasukan: %s, pengeluaran: %s, dan net cashflow: %s.", dateLabel, formatRupiah(0), formatRupiah(0), formatRupiah(0))
 	}
-	topCategory := topCategoryName(byCat)
-	mainRows := make([]string, 0, minInt(len(expenses), 3))
-	for i := 0; i < len(expenses) && i < 3; i++ {
-		row := expenses[i]
+	if expenseOnly {
+		if len(expenses) == 0 {
+			if lang == "en" {
+				return fmt.Sprintf("There are %d transaction(s) today (%s), but none are expenses. Total income is %s.", totalRows, dateLabel, formatRupiah(totalIncome))
+			}
+			return fmt.Sprintf("Ada %d transaksi hari ini (%s), tetapi tidak ada pengeluaran. Total pemasukan hari ini %s.", totalRows, dateLabel, formatRupiah(totalIncome))
+		}
+		topCategory := topCategoryName(byCat)
+		if lang == "en" {
+			return fmt.Sprintf("Today's spending (%s) is %s from %d expense transaction(s). Largest category: %s.", dateLabel, formatRupiah(totalExpense), len(expenses), topCategory)
+		}
+		return fmt.Sprintf("Total pengeluaran hari ini (%s) adalah %s dari %d transaksi pengeluaran. Kategori terbesar: %s.", dateLabel, formatRupiah(totalExpense), len(expenses), topCategory)
+	}
+
+	mainRows := make([]string, 0, minInt(len(rows), 3))
+	for i := 0; i < len(rows) && i < 3; i++ {
+		row := rows[i]
 		name := strings.TrimSpace(row.MerchantName)
 		if name == "" {
 			name = strings.TrimSpace(row.Description)
@@ -1056,12 +1177,20 @@ func buildTodayExpenseAnswer(rows []domain.Transaction, lang string, day time.Ti
 		if name == "" {
 			name = "Transaksi"
 		}
-		mainRows = append(mainRows, fmt.Sprintf("%s (%s)", name, transactionCategoryName(row)))
+		mainRows = append(mainRows, fmt.Sprintf("%s %s", name, formatRupiah(row.Amount)))
 	}
 	if lang == "en" {
-		return fmt.Sprintf("Your expenses today (%s) are %s from %d transaction(s). Main category: %s. Transactions: %s.", day.Format("2006-01-02"), formatRupiah(total), len(expenses), topCategory, strings.Join(mainRows, ", "))
+		return fmt.Sprintf("You have %d transaction(s) today (%s). Income: %s, spending: %s, net cashflow: %s. Latest: %s.", totalRows, dateLabel, formatRupiah(totalIncome), formatRupiah(totalExpense), formatRupiah(totalIncome-totalExpense), strings.Join(mainRows, ", "))
 	}
-	return fmt.Sprintf("Pengeluaran kamu hari ini (%s) adalah %s dari %d transaksi. Kategori utama: %s. Transaksi: %s.", day.Format("2006-01-02"), formatRupiah(total), len(expenses), topCategory, strings.Join(mainRows, ", "))
+	return fmt.Sprintf("Hari ini (%s) ada %d transaksi. Pemasukan: %s, pengeluaran: %s, dan net cashflow: %s. Transaksi terbaru: %s.", dateLabel, totalRows, formatRupiah(totalIncome), formatRupiah(totalExpense), formatRupiah(totalIncome-totalExpense), strings.Join(mainRows, ", "))
+}
+
+func formatChatDay(day time.Time, lang string) string {
+	if lang != "id" {
+		return day.Format("02 January 2006")
+	}
+	months := [...]string{"Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"}
+	return fmt.Sprintf("%d %s %d", day.Day(), months[int(day.Month())-1], day.Year())
 }
 
 func isWalletStartingBalanceQuestion(message string) bool {

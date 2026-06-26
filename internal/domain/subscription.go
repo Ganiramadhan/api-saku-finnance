@@ -68,6 +68,7 @@ type Subscription struct {
 	PaymentExpiresAt    *time.Time `gorm:"index"`
 	PaymentPaidAt       *time.Time
 	PaymentExpiredAt    *time.Time
+	PendingEmailSent    bool       `gorm:"not null;default:false"`
 	ReferralCode        string     `gorm:"type:varchar(32);index"`
 	ReferralRewardPaid  bool       `gorm:"not null;default:false"`
 	ReferrerID          *uuid.UUID `gorm:"type:uuid;index"`

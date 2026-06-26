@@ -332,7 +332,11 @@ func (a *App) runReminderPass(
 			_ = notificationSvc.Create(ctx, domain.Notification{
 				UserID: item.UserID, Type: "upcoming_billing_reminder", Title: title, Message: message, RefType: "upcoming_billing", RefID: item.ID.String(),
 			})
-			_ = mailClient.Send(item.User.Email, title, message+"\n\nOpen SAKU to review cashflow and prepare the payment.")
+			_ = mailClient.Send(
+				item.User.Email,
+				title,
+				billReminderEmailHTML(item.User.Name, item.Name, item.Amount, item.Currency, item.DueDate),
+			)
 		}
 	}
 
@@ -363,7 +367,11 @@ func (a *App) runReminderPass(
 			_ = notificationSvc.Create(ctx, domain.Notification{
 				UserID: sub.UserID, Type: "subscription_expiring_soon", Title: title, Message: message, RefType: "subscription", RefID: sub.ID.String(),
 			})
-			_ = mailClient.Send(sub.User.Email, title, message+"\n\nOpen SAKU to manage your subscription.")
+			_ = mailClient.Send(
+				sub.User.Email,
+				title,
+				subscriptionReminderEmailHTML(sub.User.Name, sub.Plan.Name, *due, daysLeft, false),
+			)
 			continue
 		}
 		if daysLeft == 0 {
@@ -372,7 +380,11 @@ func (a *App) runReminderPass(
 			_ = notificationSvc.Create(ctx, domain.Notification{
 				UserID: sub.UserID, Type: "subscription_ended", Title: title, Message: message, RefType: "subscription", RefID: sub.ID.String(),
 			})
-			_ = mailClient.Send(sub.User.Email, title, message+"\n\nOpen SAKU to renew your subscription.")
+			_ = mailClient.Send(
+				sub.User.Email,
+				title,
+				subscriptionReminderEmailHTML(sub.User.Name, sub.Plan.Name, *due, daysLeft, true),
+			)
 			sub.Status = domain.SubscriptionStatusExpired
 			sub.NextBillingAt = nil
 			if err := subRepo.UpdateSubscription(&sub); err != nil {
@@ -380,6 +392,61 @@ func (a *App) runReminderPass(
 			}
 		}
 	}
+}
+
+func billReminderEmailHTML(name, billName string, amount float64, currency string, dueDate time.Time) string {
+	displayName := strings.TrimSpace(name)
+	if displayName == "" {
+		displayName = "SAKU user"
+	}
+	detail := fmt.Sprintf(
+		"Bill: %s\nAmount: %s\nDue date: %s",
+		strings.TrimSpace(billName),
+		formatMoney(amount, currency),
+		dueDate.Format("02 Jan 2006"),
+	)
+	return mailer.BlueTemplate(mailer.BlueTemplateData{
+		Title:       "Upcoming Bill Reminder",
+		Preheader:   fmt.Sprintf("%s is due in 7 days.", strings.TrimSpace(billName)),
+		Badge:       "Billing Reminder",
+		Greeting:    fmt.Sprintf("Hi %s,", displayName),
+		Intro:       "One of your upcoming bills is due in 7 days. Prepare the balance early so the payment does not disrupt your cashflow.",
+		DetailLabel: "Billing Detail",
+		DetailValue: detail,
+		Warning:     "Open SAKU to review this bill, check your available wallet balance, and adjust the reminder when needed.",
+		Footer:      "SAKU helps you stay ahead of recurring payments. This is an automated email, please do not reply.",
+	})
+}
+
+func subscriptionReminderEmailHTML(name, planName string, dueDate time.Time, daysLeft int, ended bool) string {
+	displayName := strings.TrimSpace(name)
+	if displayName == "" {
+		displayName = "SAKU user"
+	}
+	title := "Subscription Reminder"
+	preheader := fmt.Sprintf("Your %s subscription ends in %d days.", planName, daysLeft)
+	intro := "Your SAKU subscription period is almost over. Renew or prepare payment to keep your Pro features available without interruption."
+	warning := "Open SAKU to review your subscription and create a new invoice before the active period ends."
+	badge := "Subscription"
+	if ended {
+		title = "Subscription Ended"
+		preheader = fmt.Sprintf("Your %s subscription period has ended.", planName)
+		intro = "Your SAKU subscription period has ended. You can renew at any time to restore access to Pro features."
+		warning = "Open SAKU to choose a plan and create a new invoice when you are ready to continue."
+		badge = "Renewal Needed"
+	}
+	detail := fmt.Sprintf("Plan: %s\nPeriod end: %s\nStatus: %s", planName, dueDate.Format("02 Jan 2006"), map[bool]string{true: "Ended", false: "Active"}[ended])
+	return mailer.BlueTemplate(mailer.BlueTemplateData{
+		Title:       title,
+		Preheader:   preheader,
+		Badge:       badge,
+		Greeting:    fmt.Sprintf("Hi %s,", displayName),
+		Intro:       intro,
+		DetailLabel: "Subscription Detail",
+		DetailValue: detail,
+		Warning:     warning,
+		Footer:      "Thank you for using SAKU. This is an automated email, please do not reply.",
+	})
 }
 
 func formatMoney(amount float64, currency string) string {

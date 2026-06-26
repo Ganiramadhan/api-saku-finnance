@@ -25,6 +25,7 @@ type Repository interface {
 	// Subscriptions
 	CreateSubscription(s *domain.Subscription) error
 	UpdateSubscription(s *domain.Subscription) error
+	ClaimPendingEmail(id uuid.UUID) (bool, error)
 	FindByOrderID(orderID string) (*domain.Subscription, error)
 	FindActiveByUserID(userID uuid.UUID) (*domain.Subscription, error)
 	FindPendingByUserID(userID uuid.UUID) (*domain.Subscription, error)
@@ -134,6 +135,13 @@ func (r *repository) CreateSubscription(s *domain.Subscription) error {
 
 func (r *repository) UpdateSubscription(s *domain.Subscription) error {
 	return r.db.Save(s).Error
+}
+
+func (r *repository) ClaimPendingEmail(id uuid.UUID) (bool, error) {
+	result := r.db.Model(&domain.Subscription{}).
+		Where("id = ? AND pending_email_sent = ?", id, false).
+		Update("pending_email_sent", true)
+	return result.RowsAffected == 1, result.Error
 }
 
 func (r *repository) FindByOrderID(orderID string) (*domain.Subscription, error) {

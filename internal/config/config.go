@@ -119,7 +119,6 @@ func Load() *Config {
 	redisDB := mustGetEnvInt("REDIS_DB")
 	redisPool := mustGetEnvInt("REDIS_POOL_SIZE")
 	jwtTTLHours := mustGetEnvInt("JWT_TTL_HOURS")
-
 	return &Config{
 		App: AppConfig{
 			Port: mustGetEnv("APP_PORT"),

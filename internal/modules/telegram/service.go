@@ -51,6 +51,8 @@ type pendingPreview struct {
 	Items     []pendingTransaction
 	Total     float64
 	CreatedAt time.Time
+	ImageKey  string
+	AILogID   string
 }
 
 type pendingTransaction struct {
@@ -177,9 +179,14 @@ func (s *service) buildReceiptPreview(ctx context.Context, userID uuid.UUID, fil
 	if !isSupportedReceiptMedia(mediaType) {
 		return pendingPreview{}, errors.New("unsupported receipt image")
 	}
+	cats, err := s.categories.List(userID, "")
+	if err != nil {
+		return pendingPreview{}, err
+	}
 	out, err := s.ai.ScanReceipt(ctx, userID, dto.ScanReceiptRequest{
-		ImageBase64: base64.StdEncoding.EncodeToString(data),
-		MediaType:   mediaType,
+		ImageBase64:    base64.StdEncoding.EncodeToString(data),
+		MediaType:      mediaType,
+		UserCategories: uniqueCategoryNames(cats),
 	})
 	if err != nil {
 		return pendingPreview{}, err
@@ -214,10 +221,15 @@ func (s *service) previewFromReceipt(ctx context.Context, userID uuid.UUID, out 
 		Description:     description,
 		MerchantName:    cleanMerchant(out.MerchantName),
 		TransactionDate: parseTransactionDate(out.Date),
-		Source:          domain.TxnSourceAPI,
+		Source:          domain.TxnSourceAIOCR,
 		ConfidenceScore: &confidence,
 	}
-	preview := pendingPreview{UserID: userID, CreatedAt: time.Now()}
+	preview := pendingPreview{
+		UserID:    userID,
+		CreatedAt: time.Now(),
+		ImageKey:  out.ImageKey,
+		AILogID:   out.LogID,
+	}
 	preview.Items = append(preview.Items, pendingTransaction{
 		Request:      req,
 		WalletName:   w.Name,
@@ -278,13 +290,14 @@ func (s *service) rememberTelegramUsername(chatID string, from *User, chat Chat)
 
 func (s *service) answerFinanceQuestion(ctx context.Context, userID uuid.UUID, text string, chatID int64) (string, error) {
 	history := s.getHistory(chatID)
+	jakartaNow := time.Now().In(jakartaLocation())
 	out, err := s.ai.Chat(ctx, userID, dto.ChatRequest{
 		Message:        text,
 		IncludeContext: true,
 		History:        history,
 		SessionID:      "telegram-chat:" + strconv.FormatInt(chatID, 10),
 		Language:       "id",
-		ReferenceDate:  time.Now().Format(time.RFC3339),
+		ReferenceDate:  jakartaNow.Format(time.RFC3339),
 		Timezone:       "Asia/Jakarta",
 	})
 	if err != nil {
@@ -316,7 +329,7 @@ func (s *service) buildPreview(ctx context.Context, userID uuid.UUID, text strin
 		UserCategories: uniqueCategoryNames(cats),
 		SessionID:      "telegram-nlp:" + strconv.FormatInt(time.Now().UnixNano(), 10),
 		Language:       "id",
-		ReferenceDate:  time.Now().Format(time.RFC3339),
+		ReferenceDate:  time.Now().In(jakartaLocation()).Format(time.RFC3339),
 		Timezone:       "Asia/Jakarta",
 	})
 	if err != nil {
@@ -382,6 +395,12 @@ func (s *service) confirmPending(ctx context.Context, chatID int64, userID uuid.
 			return "", err
 		}
 		lines = append(lines, fmt.Sprintf("Tersimpan: %s %s, %s, %s, %s.", signPrefix(item.Request.Type), formatRupiah(item.Request.Amount), item.Description, item.CategoryName, item.WalletName))
+	}
+	if preview.ImageKey != "" {
+		_, _ = s.ai.PromoteScanImage(ctx, userID, dto.PromoteScanImageRequest{
+			ImageKey: preview.ImageKey,
+			LogID:    preview.AILogID,
+		})
 	}
 	s.clearPending(chatID)
 	return "✅ Transaksi berhasil disimpan.\n" + strings.Join(lines, "\n") + "\nTotal: " + formatSignedRupiah(preview.Total), nil
@@ -600,10 +619,7 @@ func uniqueCategoryNames(categories []domain.Category) []string {
 }
 
 func parseTransactionDate(value string) time.Time {
-	loc, _ := time.LoadLocation("Asia/Jakarta")
-	if loc == nil {
-		loc = time.Local
-	}
+	loc := jakartaLocation()
 	value = strings.TrimSpace(value)
 	for _, layout := range []string{"2006-01-02", time.RFC3339} {
 		if parsed, err := time.ParseInLocation(layout, value, loc); err == nil {
@@ -611,6 +627,14 @@ func parseTransactionDate(value string) time.Time {
 		}
 	}
 	return time.Now().In(loc)
+}
+
+func jakartaLocation() *time.Location {
+	loc, err := time.LoadLocation("Asia/Jakarta")
+	if err != nil {
+		return time.FixedZone("WIB", 7*60*60)
+	}
+	return loc
 }
 
 func normalizeType(value string) string {

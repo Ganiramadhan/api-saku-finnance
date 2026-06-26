@@ -7,6 +7,7 @@ import (
 	"github.com/ganiramadhan/starter-go/internal/domain"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type Repository interface {
@@ -20,6 +21,7 @@ type Repository interface {
 	UpsertResetOTP(userID uuid.UUID, codeHash string, expiresAt time.Time) error
 	UpsertOTP(userID uuid.UUID, purpose, codeHash string, expiresAt time.Time) error
 	FindOTP(userID uuid.UUID, purpose string) (*domain.UserOTP, error)
+	DeleteOTP(id uuid.UUID) (bool, error)
 	ClearResetOTP(userID uuid.UUID) error
 	ClearOTP(userID uuid.UUID, purpose string) error
 	ListPasswordHistory(userID uuid.UUID, limit int) ([]domain.UserPasswordHistory, error)
@@ -117,17 +119,20 @@ func (r *repository) UpsertResetOTP(userID uuid.UUID, codeHash string, expiresAt
 }
 
 func (r *repository) UpsertOTP(userID uuid.UUID, purpose, codeHash string, expiresAt time.Time) error {
-	return r.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("user_id = ? AND purpose = ?", userID, purpose).Delete(&domain.UserOTP{}).Error; err != nil {
-			return err
-		}
-		return tx.Create(&domain.UserOTP{
-			UserID:    userID,
-			Purpose:   purpose,
-			CodeHash:  codeHash,
-			ExpiresAt: expiresAt,
-		}).Error
-	})
+	otp := domain.UserOTP{
+		UserID:    userID,
+		Purpose:   purpose,
+		CodeHash:  codeHash,
+		ExpiresAt: expiresAt,
+	}
+	return r.db.Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "user_id"}, {Name: "purpose"}},
+		DoUpdates: clause.Assignments(map[string]any{
+			"code_hash":  codeHash,
+			"expires_at": expiresAt,
+			"updated_at": time.Now().UTC(),
+		}),
+	}).Create(&otp).Error
 }
 
 func (r *repository) FindOTP(userID uuid.UUID, purpose string) (*domain.UserOTP, error) {
@@ -139,6 +144,11 @@ func (r *repository) FindOTP(userID uuid.UUID, purpose string) (*domain.UserOTP,
 		return nil, err
 	}
 	return &otp, nil
+}
+
+func (r *repository) DeleteOTP(id uuid.UUID) (bool, error) {
+	result := r.db.Where("id = ?", id).Delete(&domain.UserOTP{})
+	return result.RowsAffected == 1, result.Error
 }
 
 func (r *repository) ClearResetOTP(userID uuid.UUID) error {

@@ -1,8 +1,10 @@
 package subscription
 
 import (
+	"errors"
 	"strconv"
 
+	"github.com/ganiramadhan/starter-go/internal/domain"
 	"github.com/ganiramadhan/starter-go/internal/dto"
 	"github.com/ganiramadhan/starter-go/pkg/httpx"
 	"github.com/ganiramadhan/starter-go/pkg/validator"
@@ -103,8 +105,10 @@ func (h *Handler) ActiveSubscription(c *fiber.Ctx) error {
 	}
 	out, err := h.service.ActiveSubscription(c.Context(), uid)
 	if err != nil {
-		// 404 → return null payload instead of error so the UI can show "no active sub".
-		return httpx.OK(c, "No active subscription", nil)
+		if errors.Is(err, domain.ErrNotFound) {
+			return httpx.OK(c, "No active subscription", nil)
+		}
+		return err
 	}
 	return httpx.OK(c, "Active subscription", out)
 }

@@ -254,15 +254,18 @@ type CategorizeRequest struct {
 }
 
 type CategorizeResponse struct {
-	Amount       float64          `json:"amount" example:"87500"`
-	MerchantName string           `json:"merchant_name" example:"Starbucks"`
-	Category     string           `json:"category" example:"Food & Beverage"`
-	Type         string           `json:"type" example:"expense"`
-	Confidence   float64          `json:"confidence" example:"0.95"`
-	Date         string           `json:"date,omitempty" example:"2026-05-20"`
-	NeedsReview  bool             `json:"needs_review" example:"false"`
-	RawResponse  map[string]any   `json:"raw_response,omitempty" swaggertype:"object"`
-	Transactions []CategorizeItem `json:"transactions,omitempty"`
+	Amount                float64          `json:"amount" example:"87500"`
+	MerchantName          string           `json:"merchant_name" example:"Starbucks"`
+	Category              string           `json:"category" example:"Food & Beverage"`
+	Type                  string           `json:"type" example:"expense"`
+	Confidence            float64          `json:"confidence" example:"0.95"`
+	Date                  string           `json:"date,omitempty" example:"2026-05-20"`
+	NeedsReview           bool             `json:"needs_review" example:"false"`
+	NeedsClarification    bool             `json:"needs_clarification,omitempty" example:"true"`
+	ClarificationQuestion string           `json:"clarification_question,omitempty" example:"Nominal pembayaran VPS Ganipedia berapa?"`
+	MissingFields         []string         `json:"missing_fields,omitempty" example:"amount"`
+	RawResponse           map[string]any   `json:"raw_response,omitempty" swaggertype:"object"`
+	Transactions          []CategorizeItem `json:"transactions,omitempty"`
 }
 
 type CategorizeItem struct {

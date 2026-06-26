@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -40,6 +41,7 @@ type service struct {
 	googleClientID string
 	httpClient     *http.Client
 	mailer         mailer.Mailer
+	credentialMu   sync.Mutex
 }
 
 func NewService(users user.Repository, j *jwt.Manager, googleClientID string, mailer mailer.Mailer) Service {
@@ -102,6 +104,9 @@ func (s *service) Register(_ context.Context, req dto.RegisterRequest) (*dto.Reg
 	if !isGmailAddress(email) {
 		return nil, domain.ErrGmailRequired
 	}
+	if err := validateStrongPassword(req.Password); err != nil {
+		return nil, err
+	}
 	if existing, _ := s.users.FindByEmail(email); existing != nil {
 		if strings.EqualFold(existing.Status, "pending_verification") {
 			if err := s.sendRegistrationOTP(existing); err != nil {
@@ -140,6 +145,9 @@ func (s *service) Register(_ context.Context, req dto.RegisterRequest) (*dto.Reg
 }
 
 func (s *service) VerifyRegistration(_ context.Context, req dto.VerifyRegistrationRequest) (*dto.AuthResponse, error) {
+	s.credentialMu.Lock()
+	defer s.credentialMu.Unlock()
+
 	email := sanitizeEmail(req.Email)
 	u, err := s.users.FindByEmail(email)
 	if err != nil {
@@ -161,11 +169,15 @@ func (s *service) VerifyRegistration(_ context.Context, req dto.VerifyRegistrati
 	if err := bcrypt.CompareHashAndPassword([]byte(otp.CodeHash), []byte(strings.TrimSpace(req.OTP))); err != nil {
 		return nil, domain.ErrInvalidOTP
 	}
-	u.Status = "active"
-	if err := s.users.Update(u); err != nil {
+	deleted, err := s.users.DeleteOTP(otp.ID)
+	if err != nil {
 		return nil, err
 	}
-	if err := s.users.ClearOTP(u.ID, "email_verification"); err != nil {
+	if !deleted {
+		return nil, domain.ErrInvalidOTP
+	}
+	u.Status = "active"
+	if err := s.users.Update(u); err != nil {
 		return nil, err
 	}
 	if u.Referral == nil || u.Referral.Code == "" {
@@ -230,6 +242,9 @@ func generateOTP() (string, error) {
 }
 
 func (s *service) ChangePassword(_ context.Context, userID uuid.UUID, req dto.ChangePasswordRequest) error {
+	s.credentialMu.Lock()
+	defer s.credentialMu.Unlock()
+
 	u, err := s.users.FindByID(userID)
 	if err != nil {
 		return err
@@ -263,7 +278,8 @@ func (s *service) ForgotPassword(_ context.Context, req dto.ForgotPasswordReques
 	u, err := s.users.FindByEmail(email)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
-			return domain.ErrEmailNotRegistered
+			// Do not reveal whether an email address has an account.
+			return nil
 		}
 		return err
 	}
@@ -351,6 +367,9 @@ func forgotPasswordEmailHTML(name, email, otp string) string {
 }
 
 func (s *service) ResetPassword(_ context.Context, req dto.ResetPasswordRequest) error {
+	s.credentialMu.Lock()
+	defer s.credentialMu.Unlock()
+
 	email := strings.ToLower(strings.TrimSpace(req.Email))
 	u, err := s.users.FindByEmail(email)
 	if err != nil {
@@ -385,6 +404,13 @@ func (s *service) ResetPassword(_ context.Context, req dto.ResetPasswordRequest)
 	if err != nil {
 		return err
 	}
+	deleted, err := s.users.DeleteOTP(otp.ID)
+	if err != nil {
+		return err
+	}
+	if !deleted {
+		return domain.ErrInvalidOTP
+	}
 	if err := s.users.AddPasswordHistory(u.ID, u.Password); err != nil {
 		return err
 	}
@@ -393,7 +419,7 @@ func (s *service) ResetPassword(_ context.Context, req dto.ResetPasswordRequest)
 	if err := s.users.Update(u); err != nil {
 		return err
 	}
-	return s.users.ClearResetOTP(u.ID)
+	return nil
 }
 
 func validateStrongPassword(password string) error {

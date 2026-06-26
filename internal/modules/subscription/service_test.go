@@ -1,6 +1,7 @@
 package subscription
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -37,5 +38,46 @@ func TestMidtransExpiryTimeWithoutPaymentMethodIsUnknown(t *testing.T) {
 	got := midtransExpiryTime(dto.MidtransWebhook{}, time.Now())
 	if got != nil {
 		t.Fatalf("expected nil expiry, got %s", got)
+	}
+}
+
+func TestPaymentMethodExpiryDurations(t *testing.T) {
+	if got := expiryForPaymentType("qris"); got != 15*time.Minute {
+		t.Fatalf("expected QRIS expiry 15 minutes, got %s", got)
+	}
+	if got := expiryForPaymentType("bank_transfer"); got != 24*time.Hour {
+		t.Fatalf("expected VA expiry 24 hours, got %s", got)
+	}
+	if got := expiryForPaymentType(""); got != 24*time.Hour {
+		t.Fatalf("expected unopened Snap expiry 24 hours, got %s", got)
+	}
+}
+
+func TestPaymentPendingEmailContainsMethodExpiryAndOrder(t *testing.T) {
+	jakarta, err := time.LoadLocation("Asia/Jakarta")
+	if err != nil {
+		t.Fatal(err)
+	}
+	expiresAt := time.Date(2026, 6, 21, 16, 15, 0, 0, jakarta).UTC()
+	body := paymentPendingEmailHTML(
+		"Gani Ramadhan",
+		"Pro",
+		349000,
+		"IDR",
+		"qris",
+		"SAKU-PRO-TEST123",
+		&expiresAt,
+	)
+	for _, expected := range []string{
+		"Pembayaran Menunggu Penyelesaian",
+		"Gani Ramadhan",
+		"QRIS",
+		"21 Jun 2026 16:15 WIB",
+		"SAKU-PRO-TEST123",
+		"IDR 349000",
+	} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("expected email body to contain %q", expected)
+		}
 	}
 }

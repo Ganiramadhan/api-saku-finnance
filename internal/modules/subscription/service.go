@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ganiramadhan/starter-go/internal/domain"
@@ -21,7 +23,7 @@ const (
 	referralPaymentReward int64 = 2000
 	qrisPaymentExpiry           = 15 * time.Minute
 	virtualAccountExpiry        = 24 * time.Hour
-	snapPageExpiry              = 1 * time.Hour
+	snapPageExpiry              = 24 * time.Hour
 	proLaunchDiscountRate       = 0.30
 )
 
@@ -55,6 +57,7 @@ type service struct {
 	mailer    mailer.Mailer
 	clientKey string
 	isProd    bool
+	paymentMu sync.Mutex
 }
 
 func NewService(repo Repository, users user.Repository, m *MidtransClient, mailer mailer.Mailer, clientKey string, isProd bool) Service {
@@ -154,6 +157,9 @@ func (s *service) ValidateVoucher(_ context.Context, req dto.ValidateVoucherRequ
 }
 
 func (s *service) Checkout(ctx context.Context, userID uuid.UUID, req dto.CheckoutRequest) (*dto.CheckoutResponse, error) {
+	s.paymentMu.Lock()
+	defer s.paymentMu.Unlock()
+
 	req.Sanitize()
 	plan, err := s.repo.FindPlanByCode(req.PlanCode)
 	if err != nil {
@@ -260,6 +266,9 @@ func (s *service) Checkout(ctx context.Context, userID uuid.UUID, req dto.Checko
 }
 
 func (s *service) RenewInvoice(ctx context.Context, userID, subscriptionID uuid.UUID) (*dto.CheckoutResponse, error) {
+	s.paymentMu.Lock()
+	defer s.paymentMu.Unlock()
+
 	sub, err := s.repo.FindByUserID(userID, subscriptionID)
 	if err != nil {
 		return nil, err
@@ -268,6 +277,10 @@ func (s *service) RenewInvoice(ctx context.Context, userID, subscriptionID uuid.
 		return nil, fmt.Errorf("invoice can only be renewed for pending subscriptions")
 	}
 	s.refreshPendingPaymentStatus(ctx, sub)
+	if sub.Status != domain.SubscriptionStatusPending ||
+		sub.PaymentStatus == domain.PaymentStatusPaid {
+		return nil, fmt.Errorf("payment has already been completed")
+	}
 	if s.expirePendingIfNeeded(ctx, sub, time.Now().UTC()) {
 		if err := s.repo.UpdateSubscription(sub); err != nil {
 			return nil, err
@@ -276,6 +289,34 @@ func (s *service) RenewInvoice(ctx context.Context, userID, subscriptionID uuid.
 	if sub.Plan == nil {
 		if p, err := s.repo.FindPlanByID(sub.PlanID); err == nil {
 			sub.Plan = p
+		}
+	}
+	if strings.TrimSpace(sub.MidtransPaymentType) == "" &&
+		sub.PaymentStatus == domain.PaymentStatusPending &&
+		strings.TrimSpace(sub.SnapToken) != "" &&
+		strings.TrimSpace(sub.SnapRedirectURL) != "" &&
+		(sub.PaymentExpiresAt == nil || time.Now().UTC().Before(sub.PaymentExpiresAt.UTC())) {
+		return s.checkoutResponse(sub), nil
+	}
+	oldOrderID := strings.TrimSpace(sub.MidtransOrderID)
+	if oldOrderID != "" {
+		if s.midtrans == nil {
+			return nil, errors.New("payment gateway is not configured")
+		}
+		if err := s.midtrans.CancelTransaction(ctx, oldOrderID); err != nil {
+			return nil, fmt.Errorf("cancel previous payment before changing method: %w", err)
+		}
+		if payment, err := s.repo.FindPaymentByOrderID(oldOrderID); err == nil {
+			from := payment.Status
+			payment.Status = domain.PaymentStatusCancelled
+			if err := s.repo.UpdatePayment(payment); err != nil {
+				return nil, err
+			}
+			if from != payment.Status {
+				s.recordPaymentEvent(payment, from, payment.Status, "payment_method_changed")
+			}
+		} else if !errors.Is(err, domain.ErrNotFound) {
+			return nil, err
 		}
 	}
 	return s.createInvoice(ctx, sub, sub.Plan, sub.VoucherCode)
@@ -347,7 +388,6 @@ func (s *service) createInvoice(ctx context.Context, sub *domain.Subscription, p
 			"secure": true,
 		},
 	}
-
 	snap, err := s.midtrans.CreateSnapTransaction(ctx, payload)
 	if err != nil {
 		sub.PaymentStatus = domain.PaymentStatusFailed
@@ -362,9 +402,11 @@ func (s *service) createInvoice(ctx context.Context, sub *domain.Subscription, p
 	sub.SnapRedirectURL = snap.RedirectURL
 	sub.PaymentStatus = domain.PaymentStatusPending
 	sub.PaymentCreatedAt = &now
-	sub.PaymentExpiresAt = nil
+	defaultExpiresAt := now.Add(snapPageExpiry)
+	sub.PaymentExpiresAt = &defaultExpiresAt
 	sub.PaymentPaidAt = nil
 	sub.PaymentExpiredAt = nil
+	sub.PendingEmailSent = false
 	sub.OriginalAmount = originalAmount
 	sub.DiscountAmount = discountAmount
 	sub.Amount = float64(chargeAmount)
@@ -385,7 +427,7 @@ func (s *service) createInvoice(ctx context.Context, sub *domain.Subscription, p
 		Currency:       sub.Currency,
 		SnapToken:      snap.Token,
 		RedirectURL:    snap.RedirectURL,
-		ExpiresAt:      nil,
+		ExpiresAt:      &defaultExpiresAt,
 	}
 	if err := s.repo.CreatePayment(payment); err != nil {
 		return nil, err
@@ -397,7 +439,7 @@ func (s *service) createInvoice(ctx context.Context, sub *domain.Subscription, p
 		OrderID:        orderID,
 		SnapToken:      snap.Token,
 		RedirectURL:    snap.RedirectURL,
-		ExpiresAt:      nil,
+		ExpiresAt:      sub.PaymentExpiresAt,
 		PaymentStatus:  sub.PaymentStatus,
 		OriginalAmount: sub.OriginalAmount,
 		DiscountAmount: sub.DiscountAmount,
@@ -406,6 +448,23 @@ func (s *service) createInvoice(ctx context.Context, sub *domain.Subscription, p
 		ClientKey:      s.clientKey,
 		IsProduction:   s.isProd,
 	}, nil
+}
+
+func (s *service) checkoutResponse(sub *domain.Subscription) *dto.CheckoutResponse {
+	return &dto.CheckoutResponse{
+		SubscriptionID: sub.ID,
+		OrderID:        sub.MidtransOrderID,
+		SnapToken:      sub.SnapToken,
+		RedirectURL:    sub.SnapRedirectURL,
+		ExpiresAt:      sub.PaymentExpiresAt,
+		PaymentStatus:  sub.PaymentStatus,
+		OriginalAmount: sub.OriginalAmount,
+		DiscountAmount: sub.DiscountAmount,
+		Amount:         sub.Amount,
+		VoucherCode:    sub.VoucherCode,
+		ClientKey:      s.clientKey,
+		IsProduction:   s.isProd,
+	}
 }
 
 func (s *service) refreshPendingPaymentStatus(ctx context.Context, sub *domain.Subscription) {
@@ -569,6 +628,9 @@ func (s *service) ActiveSubscription(_ context.Context, userID uuid.UUID) (*dto.
 }
 
 func (s *service) ConfirmCheckout(ctx context.Context, userID uuid.UUID, req dto.ConfirmSubscriptionRequest) (*dto.SubscriptionResponse, error) {
+	s.paymentMu.Lock()
+	defer s.paymentMu.Unlock()
+
 	payment, err := s.repo.FindPaymentByOrderID(req.OrderID)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
@@ -646,6 +708,9 @@ func (s *service) ConfirmCheckout(ctx context.Context, userID uuid.UUID, req dto
 }
 
 func (s *service) Cancel(ctx context.Context, userID, id uuid.UUID) error {
+	s.paymentMu.Lock()
+	defer s.paymentMu.Unlock()
+
 	sub, err := s.repo.FindByUserID(userID, id)
 	if err != nil {
 		return err
@@ -675,6 +740,9 @@ func (s *service) Cancel(ctx context.Context, userID, id uuid.UUID) error {
 }
 
 func (s *service) HandleWebhook(_ context.Context, p dto.MidtransWebhook) error {
+	s.paymentMu.Lock()
+	defer s.paymentMu.Unlock()
+
 	if !s.midtrans.VerifySignature(p.OrderID, p.StatusCode, p.GrossAmount, p.SignatureKey) {
 		return fmt.Errorf("invalid signature for order %s", p.OrderID)
 	}
@@ -714,6 +782,18 @@ func (s *service) syncPaymentFromMidtrans(ctx context.Context, payment *domain.S
 func (s *service) applyMidtransStatus(payment *domain.SubscriptionPayment, sub *domain.Subscription, p dto.MidtransWebhook, eventSource string) error {
 	if payment == nil || sub == nil {
 		return domain.ErrNotFound
+	}
+	if payment.Status == domain.PaymentStatusPaid &&
+		p.TransactionStatus != "capture" &&
+		p.TransactionStatus != "settlement" {
+		// Paid is terminal. Ignore delayed pending/cancel/expire notifications.
+		return nil
+	}
+	if p.TransactionStatus == "capture" || p.TransactionStatus == "settlement" {
+		grossAmount, err := strconv.ParseFloat(strings.TrimSpace(p.GrossAmount), 64)
+		if err != nil || math.Round(grossAmount) != math.Round(payment.Amount) {
+			return fmt.Errorf("payment amount mismatch for order %s", payment.OrderID)
+		}
 	}
 	sub.MidtransTxnID = p.TransactionID
 	sub.MidtransPaymentType = p.PaymentType
@@ -782,6 +862,15 @@ func (s *service) applyMidtransStatus(payment *domain.SubscriptionPayment, sub *
 	}
 	if fromPaymentStatus != payment.Status {
 		s.recordPaymentEvent(payment, fromPaymentStatus, payment.Status, eventSource)
+	}
+	if payment.Status == domain.PaymentStatusPending && strings.TrimSpace(payment.PaymentType) != "" {
+		claimed, err := s.repo.ClaimPendingEmail(sub.ID)
+		if err != nil {
+			log.Printf("subscription: claim pending payment email failed order_id=%s: %v", payment.OrderID, err)
+		} else if claimed {
+			sub.PendingEmailSent = true
+			s.sendPaymentPendingEmail(sub)
+		}
 	}
 	if !wasActive && sub.Status == domain.SubscriptionStatusActive {
 		if strings.TrimSpace(sub.VoucherCode) != "" && sub.DiscountAmount > 0 {
@@ -941,6 +1030,96 @@ func (s *service) sendPaymentSuccessEmail(sub *domain.Subscription) {
 	body := paymentSuccessEmailHTML(u.Name, planName, planPeriod, sub.Amount, sub.Currency, sub.MidtransOrderID, sub.EndsAt)
 	if err := s.mailer.Send(u.Email, subject, body); err != nil {
 		log.Printf("subscription: queue payment success email failed: %v", err)
+	}
+}
+
+func (s *service) sendPaymentPendingEmail(sub *domain.Subscription) {
+	if s.mailer == nil || sub == nil {
+		return
+	}
+	u, err := s.users.FindByID(sub.UserID)
+	if err != nil {
+		log.Printf("subscription: pending payment email user lookup failed: %v", err)
+		return
+	}
+	planName := "SAKU"
+	if sub.Plan == nil {
+		if p, err := s.repo.FindPlanByID(sub.PlanID); err == nil {
+			sub.Plan = p
+		}
+	}
+	if sub.Plan != nil && strings.TrimSpace(sub.Plan.Name) != "" {
+		planName = sub.Plan.Name
+	}
+	subject := "Selesaikan pembayaran SAKU kamu"
+	body := paymentPendingEmailHTML(
+		u.Name,
+		planName,
+		sub.Amount,
+		sub.Currency,
+		sub.MidtransPaymentType,
+		sub.MidtransOrderID,
+		sub.PaymentExpiresAt,
+	)
+	if err := s.mailer.Send(u.Email, subject, body); err != nil {
+		log.Printf("subscription: queue pending payment email failed: %v", err)
+	}
+}
+
+func paymentPendingEmailHTML(name, planName string, amount float64, currency, paymentType, orderID string, expiresAt *time.Time) string {
+	displayName := strings.TrimSpace(name)
+	if displayName == "" {
+		displayName = "SAKU user"
+	}
+	method := paymentMethodLabel(paymentType)
+	expiry := "-"
+	if expiresAt != nil {
+		location, err := time.LoadLocation("Asia/Jakarta")
+		if err != nil {
+			location = time.FixedZone("WIB", 7*60*60)
+		}
+		expiry = expiresAt.In(location).Format("02 Jan 2006 15:04 WIB")
+	}
+	detail := fmt.Sprintf(
+		"Paket: %s\nTotal: %s %.0f\nMetode: %s\nBayar sebelum: %s\nOrder ID: %s",
+		planName,
+		currency,
+		amount,
+		method,
+		expiry,
+		orderID,
+	)
+	return mailer.BlueTemplate(mailer.BlueTemplateData{
+		Title:       "Pembayaran Menunggu Penyelesaian",
+		Preheader:   fmt.Sprintf("Selesaikan pembayaran %s sebelum %s.", method, expiry),
+		Badge:       "Pembayaran Pending",
+		Greeting:    fmt.Sprintf("Hai %s,", displayName),
+		Intro:       "Metode pembayaran sudah dipilih, tetapi transaksi belum selesai. Buka kembali SAKU dan lanjutkan invoice yang sama sebelum batas waktunya.",
+		DetailLabel: "Detail Pembayaran",
+		DetailValue: detail,
+		Warning:     "Jangan membuat pembayaran baru untuk order yang sama. Jika kamu sudah membayar, tunggu beberapa saat sampai status diperbarui otomatis.",
+		Footer:      "SAKU tidak pernah meminta OTP, PIN, atau data kartu melalui email. Ini adalah email otomatis, mohon tidak membalas.",
+	})
+}
+
+func paymentMethodLabel(paymentType string) string {
+	switch strings.ToLower(strings.TrimSpace(paymentType)) {
+	case "qris":
+		return "QRIS"
+	case "gopay":
+		return "GoPay"
+	case "bank_transfer":
+		return "Virtual Account"
+	case "echannel":
+		return "Mandiri Bill"
+	case "permata":
+		return "Permata Virtual Account"
+	default:
+		label := strings.ReplaceAll(strings.TrimSpace(paymentType), "_", " ")
+		if label == "" {
+			return "Payment gateway"
+		}
+		return label
 	}
 }
 

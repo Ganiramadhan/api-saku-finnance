@@ -122,6 +122,16 @@ func (r *fakeRepo) FindOTP(userID uuid.UUID, purpose string) (*domain.UserOTP, e
 	return &copy, nil
 }
 
+func (r *fakeRepo) DeleteOTP(id uuid.UUID) (bool, error) {
+	for _, u := range r.users {
+		if u.OTP != nil && u.OTP.ID == id {
+			u.OTP = nil
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (r *fakeRepo) ClearResetOTP(userID uuid.UUID) error {
 	return r.ClearOTP(userID, "password_reset")
 }

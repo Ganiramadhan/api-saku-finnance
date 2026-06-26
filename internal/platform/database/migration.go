@@ -33,6 +33,9 @@ func Migrate(db *gorm.DB) error {
 	if err := normalizeSubscriptionPayments(db); err != nil {
 		return fmt.Errorf("normalize subscription payments: %w", err)
 	}
+	if err := normalizeDuplicatePendingSubscriptions(db); err != nil {
+		return fmt.Errorf("normalize duplicate pending subscriptions: %w", err)
+	}
 
 	if err := normalizeTelegramChatIDs(db); err != nil {
 		return fmt.Errorf("normalize telegram chat ids: %w", err)
@@ -91,6 +94,39 @@ func normalizeSubscriptionPayments(db *gorm.DB) error {
 			WHERE payment_created_at IS NULL;
 		END IF;
 	END $$;`).Error
+}
+
+func normalizeDuplicatePendingSubscriptions(db *gorm.DB) error {
+	return db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec(`
+			WITH ranked AS (
+				SELECT id, ROW_NUMBER() OVER (
+					PARTITION BY user_id
+					ORDER BY created_at DESC, id DESC
+				) AS row_number
+				FROM subscriptions
+				WHERE status = 'pending'
+			)
+			UPDATE subscriptions
+			SET status = 'cancelled',
+				payment_status = 'cancelled',
+				next_billing_at = NULL,
+				updated_at = NOW()
+			WHERE id IN (SELECT id FROM ranked WHERE row_number > 1);
+		`).Error; err != nil {
+			return err
+		}
+		return tx.Exec(`
+			UPDATE subscription_payments AS payment
+			SET status = 'cancelled',
+				updated_at = NOW()
+			FROM subscriptions AS subscription
+			WHERE payment.subscription_id = subscription.id
+				AND subscription.status = 'cancelled'
+				AND subscription.payment_status = 'cancelled'
+				AND payment.status = 'pending';
+		`).Error
+	})
 }
 
 func autoMigrate(db *gorm.DB) error {
@@ -326,6 +362,8 @@ var indexStatements = []string{
 	`CREATE INDEX IF NOT EXISTS idx_subscriptions_user ON subscriptions (user_id)`,
 	`CREATE INDEX IF NOT EXISTS idx_subscriptions_plan ON subscriptions (plan_id)`,
 	`CREATE INDEX IF NOT EXISTS idx_subscriptions_status ON subscriptions (status)`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS idx_subscriptions_one_pending_per_user
+		ON subscriptions (user_id) WHERE status = 'pending'`,
 	`CREATE INDEX IF NOT EXISTS idx_subscriptions_trial_ends ON subscriptions (trial_ends_at) WHERE trial_ends_at IS NOT NULL`,
 	`CREATE INDEX IF NOT EXISTS idx_subscriptions_referrer
 		ON subscriptions (referrer_id) WHERE referrer_id IS NOT NULL`,
