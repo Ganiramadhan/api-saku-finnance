@@ -17,13 +17,14 @@ type CreateUserRequest struct {
 }
 
 type UpdateUserRequest struct {
-	Name     string `json:"name" validate:"omitempty,min=2,max=120" example:"Jane Doe"`
-	Email    string `json:"email" validate:"omitempty,email" example:"jane@example.com"`
-	Password string `json:"password,omitempty" validate:"omitempty,min=8,max=72" example:"newpassword123"`
-	Role     string `json:"role" validate:"omitempty,oneof=user admin" example:"admin"`
-	Phone    string `json:"phone,omitempty" validate:"omitempty,max=32" example:"+628123456789"`
-	Status   string `json:"status,omitempty" validate:"omitempty,oneof=active pending_verification suspended" example:"active"`
-	Photo    string `json:"photo,omitempty" example:"temp/users/avatar-1a2b3c4d.png"`
+	Name             string `json:"name" validate:"omitempty,min=2,max=120" example:"Jane Doe"`
+	Email            string `json:"email" validate:"omitempty,email" example:"jane@example.com"`
+	Password         string `json:"password,omitempty" validate:"omitempty,min=8,max=72" example:"newpassword123"`
+	Role             string `json:"role" validate:"omitempty,oneof=user admin" example:"admin"`
+	Phone            string `json:"phone,omitempty" validate:"omitempty,max=32" example:"+628123456789"`
+	Status           string `json:"status,omitempty" validate:"omitempty,oneof=active pending_verification suspended" example:"active"`
+	Photo            string `json:"photo,omitempty" example:"temp/users/avatar-1a2b3c4d.png"`
+	CashflowStartDay *int   `json:"cashflow_start_day,omitempty" validate:"omitempty,gte=1,lte=31" example:"25"`
 }
 
 type BindTelegramRequest struct {
@@ -49,6 +50,7 @@ type UserResponse struct {
 	ReferralReward   int64      `json:"referral_reward,omitempty" example:"2000"`
 	TelegramChatID   string     `json:"telegram_chat_id,omitempty" example:"123456789"`
 	TelegramUsername string     `json:"telegram_username,omitempty" example:"gani_ramadhan"`
+	CashflowStartDay int        `json:"cashflow_start_day" example:"25"`
 	LastLoginAt      *time.Time `json:"last_login_at,omitempty"`
 	CreatedAt        time.Time  `json:"created_at,omitempty"`
 	UpdatedAt        time.Time  `json:"updated_at,omitempty"`

@@ -355,13 +355,14 @@ type ChatTurn struct {
 }
 
 type ChatRequest struct {
-	Message        string     `json:"message" validate:"required,min=1,max=2000" example:"Berapa pengeluaran terbesar saya bulan ini?"`
-	IncludeContext bool       `json:"include_context" example:"true"`
-	History        []ChatTurn `json:"history,omitempty"`
-	SessionID      string     `json:"session_id,omitempty" validate:"omitempty,max=120"`
-	Language       string     `json:"language,omitempty" validate:"omitempty,oneof=id en"`
-	ReferenceDate  string     `json:"reference_date,omitempty" validate:"omitempty,max=40"`
-	Timezone       string     `json:"timezone,omitempty" validate:"omitempty,max=80"`
+	Message          string     `json:"message" validate:"required,min=1,max=2000" example:"Berapa pengeluaran terbesar saya bulan ini?"`
+	IncludeContext   bool       `json:"include_context" example:"true"`
+	History          []ChatTurn `json:"history,omitempty"`
+	SessionID        string     `json:"session_id,omitempty" validate:"omitempty,max=120"`
+	Language         string     `json:"language,omitempty" validate:"omitempty,oneof=id en"`
+	ReferenceDate    string     `json:"reference_date,omitempty" validate:"omitempty,max=40"`
+	Timezone         string     `json:"timezone,omitempty" validate:"omitempty,max=80"`
+	CashflowStartDay int        `json:"cashflow_start_day,omitempty" validate:"omitempty,gte=1,lte=31"`
 }
 
 type ChatResponse struct {

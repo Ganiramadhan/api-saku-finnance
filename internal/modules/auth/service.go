@@ -569,16 +569,17 @@ func (s *service) GoogleLogin(ctx context.Context, req dto.GoogleLoginRequest) (
 
 func authUserResponse(u *domain.User) dto.UserResponse {
 	resp := dto.UserResponse{
-		ID:           u.ID,
-		Name:         u.Name,
-		Email:        u.Email,
-		Phone:        u.Phone,
-		Role:         u.Role,
-		AuthProvider: u.AuthProvider,
-		Photo:        u.Photo,
-		PhotoURL:     externalPhotoURL(u.Photo),
-		Status:       u.Status,
-		LastLoginAt:  u.LastLoginAt,
+		ID:               u.ID,
+		Name:             u.Name,
+		Email:            u.Email,
+		Phone:            u.Phone,
+		Role:             u.Role,
+		AuthProvider:     u.AuthProvider,
+		Photo:            u.Photo,
+		PhotoURL:         externalPhotoURL(u.Photo),
+		Status:           u.Status,
+		CashflowStartDay: u.CashflowStartDay,
+		LastLoginAt:      u.LastLoginAt,
 	}
 	if u.Referral != nil {
 		resp.ReferralCode = u.Referral.Code

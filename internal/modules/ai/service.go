@@ -162,7 +162,7 @@ FOLLOW-UPS — IMPORTANT:
   Do NOT refuse just because the request mentions JSON / list / table.
 - NEVER hallucinate transactions. Only mention numbers that appear in the provided context or previous assistant message.
 - Treat exact summaries such as today_transactions, today_income, today_expense,
-  requested_date_transactions, and month_transactions as authoritative database
+  requested_date_transactions, and cycle_transactions as authoritative database
   results. Never say there are no transactions when one of those values is above zero.
 - Lead with the direct answer and core number first. Then add at most one useful
   interpretation or next action. Avoid formal filler such as "Berdasarkan data yang tersedia".
@@ -804,18 +804,20 @@ func (s *service) Chat(ctx context.Context, userID uuid.UUID, req dto.ChatReques
 		to := referenceNow
 		from := to.AddDate(0, -1, 0)
 		todayStart := time.Date(to.Year(), to.Month(), to.Day(), 0, 0, 0, 0, to.Location())
-		monthStart := time.Date(to.Year(), to.Month(), 1, 0, 0, 0, 0, to.Location())
+		cashflowStartDay := normalizedCashflowStartDay(req.CashflowStartDay)
+		periodStart, periodEnd := cashflowPeriodFor(to, cashflowStartDay)
 		recentRows, _, err := s.txns.List(transaction.ListFilter{
 			UserID: userID, From: &from, To: &to, Page: 1, Limit: 100,
 		})
 		todayRows, _, todayErr := s.listTransactionsForLocalDay(userID, todayStart, 5000)
 		monthRows, _, monthErr := s.txns.List(transaction.ListFilter{
-			UserID: userID, From: &monthStart, To: &to, Page: 1, Limit: 500,
+			UserID: userID, From: &periodStart, To: &to, Page: 1, Limit: 500,
 		})
 		allRows, totalTransactions, allErr := s.txns.List(transaction.ListFilter{
 			UserID: userID, Page: 1, Limit: 1000,
 		})
-		promptBuilder.WriteString(fmt.Sprintf("Exact date context:\n- today=%s\n- current_month=%s\n", todayStart.Format("2006-01-02"), monthStart.Format("2006-01")))
+		promptBuilder.WriteString(fmt.Sprintf("Exact date context:\n- today=%s\n- current_cashflow_cycle=%s to %s\n- cashflow_cycle_start_day=%d\n",
+			todayStart.Format("2006-01-02"), periodStart.Format("2006-01-02"), periodEnd.Format("2006-01-02"), cashflowStartDay))
 		if date, ok := extractSpecificDate(req.Message, referenceNow); ok {
 			dayStart := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
 			dateRows, dateTotal, dateErr := s.listTransactionsForLocalDay(userID, dayStart, 5000)
@@ -871,10 +873,10 @@ func (s *service) Chat(ctx context.Context, userID uuid.UUID, req dto.ChatReques
 		}
 		if monthErr == nil {
 			income, expense, byCat := summarise(monthRows)
-			promptBuilder.WriteString(fmt.Sprintf("- month_transactions=%d, month_income=%.2f, month_expense=%.2f, month_top_expense_categories=%s\n", len(monthRows), income, expense, topCategoriesString(byCat, 5)))
-			promptBuilder.WriteString(fmt.Sprintf("- month_by_wallet=%s\n", walletSummaryString(monthRows, 8)))
+			promptBuilder.WriteString(fmt.Sprintf("- cycle_transactions=%d, cycle_income=%.2f, cycle_expense=%.2f, cycle_top_expense_categories=%s\n", len(monthRows), income, expense, topCategoriesString(byCat, 5)))
+			promptBuilder.WriteString(fmt.Sprintf("- cycle_by_wallet=%s\n", walletSummaryString(monthRows, 8)))
 		}
-		promptBuilder.WriteString("- For questions about today/hari ini or this month/bulan ini, use these exact summaries first.\n\n")
+		promptBuilder.WriteString("- For questions about today/hari ini, use today summaries. For this month/bulan ini/current cycle/siklus ini, use the cashflow cycle summaries first.\n\n")
 		if allErr == nil && totalTransactions > 0 {
 			income, expense, byCat := summarise(allRows)
 			promptBuilder.WriteString(fmt.Sprintf("All-time transaction context:\n- total_transactions=%d\n- loaded_transactions_for_amount_summary=%d\n- income=%.2f, expense=%.2f\n- top expense categories: %s\n",
@@ -1029,6 +1031,33 @@ func requestReferenceTime(referenceDate, timezone string) time.Time {
 		return parsed.In(loc)
 	}
 	return time.Now().In(loc)
+}
+
+func normalizedCashflowStartDay(day int) int {
+	if day < 1 || day > 31 {
+		return 1
+	}
+	return day
+}
+
+func cashflowPeriodFor(reference time.Time, startDay int) (time.Time, time.Time) {
+	day := normalizedCashflowStartDay(startDay)
+	startCandidate := dateForMonthDay(reference.Year(), reference.Month(), day, reference.Location())
+	start := startCandidate
+	if reference.Before(startCandidate) {
+		start = dateForMonthDay(reference.Year(), reference.Month()-1, day, reference.Location())
+	}
+	nextStart := dateForMonthDay(start.Year(), start.Month()+1, day, reference.Location())
+	end := nextStart.Add(-time.Nanosecond)
+	return start, end
+}
+
+func dateForMonthDay(year int, month time.Month, day int, loc *time.Location) time.Time {
+	lastDay := time.Date(year, month+1, 0, 0, 0, 0, 0, loc).Day()
+	if day > lastDay {
+		day = lastDay
+	}
+	return time.Date(year, month, day, 0, 0, 0, 0, loc)
 }
 
 func defaultFinanceLocation() *time.Location {

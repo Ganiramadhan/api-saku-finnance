@@ -17,6 +17,7 @@ type User struct {
 	Phone            string     `gorm:"type:varchar(32)"`
 	TelegramChatID   *string    `gorm:"type:varchar(64);uniqueIndex"`
 	TelegramUsername *string    `gorm:"type:varchar(64)"`
+	CashflowStartDay int        `gorm:"not null;default:1"`
 	Role             string     `gorm:"type:varchar(50);not null;default:'user'"`
 	Status           string     `gorm:"type:varchar(20);not null;default:'active'"`
 	LastLoginAt      *time.Time `gorm:"index"`

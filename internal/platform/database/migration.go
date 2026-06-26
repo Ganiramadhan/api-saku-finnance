@@ -30,6 +30,10 @@ func Migrate(db *gorm.DB) error {
 		return fmt.Errorf("auto migrate: %w", err)
 	}
 
+	if err := normalizeCashflowStartDays(db); err != nil {
+		return fmt.Errorf("normalize cashflow start days: %w", err)
+	}
+
 	if err := normalizeSubscriptionPayments(db); err != nil {
 		return fmt.Errorf("normalize subscription payments: %w", err)
 	}
@@ -50,6 +54,24 @@ func Migrate(db *gorm.DB) error {
 	}
 
 	return nil
+}
+
+func normalizeCashflowStartDays(db *gorm.DB) error {
+	return db.Exec(`DO $$
+	BEGIN
+		IF EXISTS (
+			SELECT 1 FROM information_schema.columns
+			WHERE table_schema = current_schema()
+				AND table_name = 'users'
+				AND column_name = 'cashflow_start_day'
+		) THEN
+			UPDATE users
+			SET cashflow_start_day = 1
+			WHERE cashflow_start_day IS NULL
+				OR cashflow_start_day < 1
+				OR cashflow_start_day > 31;
+		END IF;
+	END $$;`).Error
 }
 
 func normalizeTelegramChatIDs(db *gorm.DB) error {

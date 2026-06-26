@@ -158,6 +158,9 @@ func (s *service) Update(ctx context.Context, id uuid.UUID, req dto.UpdateUserRe
 	if req.Status != "" {
 		u.Status = req.Status
 	}
+	if req.CashflowStartDay != nil {
+		u.CashflowStartDay = *req.CashflowStartDay
+	}
 
 	oldPhoto := u.Photo
 	newPhoto := req.Photo
@@ -286,17 +289,18 @@ func (s *service) DisconnectTelegram(ctx context.Context, id uuid.UUID) (*dto.Us
 
 func (s *service) toResponse(ctx context.Context, u domain.User) dto.UserResponse {
 	resp := dto.UserResponse{
-		ID:           u.ID,
-		Name:         u.Name,
-		Email:        u.Email,
-		Role:         u.Role,
-		AuthProvider: u.AuthProvider,
-		Phone:        u.Phone,
-		Status:       u.Status,
-		Photo:        u.Photo,
-		LastLoginAt:  u.LastLoginAt,
-		CreatedAt:    u.CreatedAt,
-		UpdatedAt:    u.UpdatedAt,
+		ID:               u.ID,
+		Name:             u.Name,
+		Email:            u.Email,
+		Role:             u.Role,
+		AuthProvider:     u.AuthProvider,
+		Phone:            u.Phone,
+		Status:           u.Status,
+		Photo:            u.Photo,
+		CashflowStartDay: u.CashflowStartDay,
+		LastLoginAt:      u.LastLoginAt,
+		CreatedAt:        u.CreatedAt,
+		UpdatedAt:        u.UpdatedAt,
 	}
 	if u.TelegramChatID != nil {
 		resp.TelegramChatID = *u.TelegramChatID
