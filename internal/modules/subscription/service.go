@@ -40,6 +40,7 @@ type Service interface {
 	Cancel(ctx context.Context, userID, id uuid.UUID) error
 	HasActiveProSubscription(ctx context.Context, userID uuid.UUID) (bool, error)
 	ActivePlanCode(ctx context.Context, userID uuid.UUID) (string, bool, error)
+	HasPaidSubscriptionHistory(ctx context.Context, userID uuid.UUID) (bool, error)
 	// Admin
 	ListAllAdmin(ctx context.Context, limit, offset int) ([]dto.AdminSubscriptionResponse, error)
 	ListVouchersAdmin(ctx context.Context, limit, offset int) ([]dto.VoucherResponse, error)
@@ -1318,7 +1319,7 @@ func (s *service) HasActiveProSubscription(_ context.Context, userID uuid.UUID) 
 	if sub == nil {
 		return false, nil
 	}
-	if sub.Status != domain.SubscriptionStatusActive {
+	if !isCurrentlyActiveSubscription(sub, time.Now().UTC()) {
 		return false, nil
 	}
 	planCode := ""
@@ -1338,11 +1339,25 @@ func (s *service) ActivePlanCode(_ context.Context, userID uuid.UUID) (string, b
 		}
 		return "free", false, err
 	}
-	if sub == nil || sub.Status != domain.SubscriptionStatusActive {
+	if sub == nil || !isCurrentlyActiveSubscription(sub, time.Now().UTC()) {
 		return "free", false, nil
 	}
 	if sub.Plan != nil && sub.Plan.Code != "" {
 		return sub.Plan.Code, true, nil
 	}
 	return "pro", true, nil
+}
+
+func (s *service) HasPaidSubscriptionHistory(_ context.Context, userID uuid.UUID) (bool, error) {
+	return s.repo.HasPaidSubscriptionHistory(userID)
+}
+
+func isCurrentlyActiveSubscription(sub *domain.Subscription, now time.Time) bool {
+	if sub == nil || sub.Status != domain.SubscriptionStatusActive {
+		return false
+	}
+	if sub.EndsAt != nil && !now.Before(sub.EndsAt.UTC()) {
+		return false
+	}
+	return true
 }

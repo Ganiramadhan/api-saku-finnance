@@ -60,14 +60,19 @@ type service struct {
 	logs    ailog.Service
 	storage storage.Storage
 	model   string
-	subs    subscription.Service
+	subs    subscriptionAccess
+}
+
+type subscriptionAccess interface {
+	ActivePlanCode(ctx context.Context, userID uuid.UUID) (string, bool, error)
+	HasPaidSubscriptionHistory(ctx context.Context, userID uuid.UUID) (bool, error)
 }
 
 func NewService(claude *aiplatform.Client, txns transaction.Repository, wallets wallet.Repository, cats category.Repository, logs ailog.Service, store storage.Storage, model string, subs ...subscription.Service) Service {
 	if model == "" {
 		model = "claude-sonnet-4-5"
 	}
-	var subSvc subscription.Service
+	var subSvc subscriptionAccess
 	if len(subs) > 0 {
 		subSvc = subs[0]
 	}
@@ -84,6 +89,15 @@ func (s *service) enforceDailyQuota(ctx context.Context, userID uuid.UUID, featu
 		}
 		planCode = code
 		hasActivePlan = active
+		if !hasActivePlan {
+			hasPaidHistory, err := s.subs.HasPaidSubscriptionHistory(ctx, userID)
+			if err != nil {
+				return err
+			}
+			if hasPaidHistory {
+				return fiber.NewError(fiber.StatusForbidden, "Your subscription has expired. Renew your plan to use SAKU AI again")
+			}
+		}
 	}
 	if s.logs == nil || limit <= 0 {
 		return nil

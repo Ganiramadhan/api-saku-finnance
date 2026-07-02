@@ -29,6 +29,7 @@ type Repository interface {
 	FindByOrderID(orderID string) (*domain.Subscription, error)
 	FindActiveByUserID(userID uuid.UUID) (*domain.Subscription, error)
 	FindPendingByUserID(userID uuid.UUID) (*domain.Subscription, error)
+	HasPaidSubscriptionHistory(userID uuid.UUID) (bool, error)
 	FindByUserID(userID, id uuid.UUID) (*domain.Subscription, error)
 	ListByUserID(userID uuid.UUID) ([]domain.Subscription, error)
 	ListAll(limit, offset int) ([]domain.Subscription, error)
@@ -188,6 +189,17 @@ func (r *repository) FindPendingByUserID(userID uuid.UUID) (*domain.Subscription
 		return nil, domain.ErrNotFound
 	}
 	return &rows[0], nil
+}
+
+func (r *repository) HasPaidSubscriptionHistory(userID uuid.UUID) (bool, error) {
+	var total int64
+	err := r.db.Model(&domain.Subscription{}).
+		Joins("JOIN plans ON plans.id = subscriptions.plan_id").
+		Where("subscriptions.user_id = ?", userID).
+		Where("subscriptions.payment_status = ?", domain.PaymentStatusPaid).
+		Where("plans.price > 0").
+		Count(&total).Error
+	return total > 0, err
 }
 
 func (r *repository) ListByUserID(userID uuid.UUID) ([]domain.Subscription, error) {

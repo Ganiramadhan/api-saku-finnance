@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ganiramadhan/starter-go/internal/domain"
 	"github.com/ganiramadhan/starter-go/internal/dto"
 )
 
@@ -79,5 +80,18 @@ func TestPaymentPendingEmailContainsMethodExpiryAndOrder(t *testing.T) {
 		if !strings.Contains(body, expected) {
 			t.Fatalf("expected email body to contain %q", expected)
 		}
+	}
+}
+
+func TestIsCurrentlyActiveSubscriptionRequiresFutureEndDate(t *testing.T) {
+	now := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
+	past := now.Add(-time.Second)
+	future := now.Add(time.Second)
+
+	if isCurrentlyActiveSubscription(&domain.Subscription{Status: domain.SubscriptionStatusActive, EndsAt: &past}, now) {
+		t.Fatal("expected expired active row to be treated as inactive")
+	}
+	if !isCurrentlyActiveSubscription(&domain.Subscription{Status: domain.SubscriptionStatusActive, EndsAt: &future}, now) {
+		t.Fatal("expected future-ended active row to be active")
 	}
 }
