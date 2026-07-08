@@ -366,12 +366,11 @@ Services included:
 
 # CI/CD Deployment
 
-Production deployment uses `docker-compose.prd.yaml` and Jenkins. The pipeline builds the Go API image, pushes it to the registry, uploads the production compose file to the server deploy directory, passes the runtime environment from a Jenkins secret file during deploy, then runs `docker compose up -d` with a health check and rollback image tracking.
+Production deployment uses `docker-compose.prd.yaml` from the repository and Jenkins. The pipeline builds the Go API image, pushes it to the registry, sends the compose file and runtime environment to a temporary remote directory, then runs `docker compose up -d` with a health check.
 
 Expected Jenkins credentials:
 
 - `saku-finance-api-env` as secret file containing the production API `.env`
-- `saku-finance-api-deploy-path` as secret text containing the absolute server deploy directory
 - `docker-registry-host` as secret text, without protocol
 - `docker-registry-username` as secret text
 - `docker-registry-credentials` as secret text for the registry password or access token
@@ -380,14 +379,7 @@ Expected Jenkins credentials:
 - `ganipedia-host-ssh-user` as secret text
 - `ganipedia-host-ssh-password` as secret text
 
-The server deploy directory is expected to contain:
-
-```text
-docker-compose.prd.yaml
-.previous_image
-```
-
-The production `.env` is not kept in the deploy directory. Jenkins writes it to a temporary remote directory for the deploy command and removes it after the deployment script exits. The API is attached to the `saku-finance` Docker network with alias `api-saku-finance` and listens on internal port `4001`.
+No permanent compose or `.env` file is required on the server. Jenkins writes them to a temporary remote directory for the deploy command and removes them after the deployment script exits. The API is attached to the `saku-finance` Docker network with alias `api-saku-finance` and listens on internal port `4001`.
 
 ---
 

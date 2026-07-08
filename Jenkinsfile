@@ -12,7 +12,6 @@ pipeline {
         DEPLOY_SSH_PORT_CREDENTIALS_ID = "ganipedia-host-ssh-port"
         DEPLOY_SSH_USER_CREDENTIALS_ID = "ganipedia-host-ssh-user"
         DEPLOY_SSH_PASSWORD_CREDENTIALS_ID = "ganipedia-host-ssh-password"
-        DEPLOY_PATH_CREDENTIALS_ID = "saku-finance-api-deploy-path"
 
         IMAGE_NAME = "api-saku-finance"
         APP_NAME = "api-saku-finance"
@@ -20,7 +19,7 @@ pipeline {
         NETWORK_ALIAS = "api-saku-finance"
         CONTAINER_PORT = "4001"
         HEALTH_PATH = "/health"
-        COMPOSE_FILE = "docker-compose.prd.yaml"
+        COMPOSE_FILE = "docker-compose.yaml"
 
         DOCKER_BUILDKIT = "1"
     }
@@ -91,14 +90,13 @@ Alias       : ${NETWORK_ALIAS}:${CONTAINER_PORT}
                     string(credentialsId: "${DEPLOY_HOST_CREDENTIALS_ID}", variable: 'DEPLOY_HOST'),
                     string(credentialsId: "${DEPLOY_SSH_PORT_CREDENTIALS_ID}", variable: 'DEPLOY_SSH_PORT'),
                     string(credentialsId: "${DEPLOY_SSH_USER_CREDENTIALS_ID}", variable: 'DEPLOY_SSH_USER'),
-                    string(credentialsId: "${DEPLOY_SSH_PASSWORD_CREDENTIALS_ID}", variable: 'SSH_PASS'),
-                    string(credentialsId: "${DEPLOY_PATH_CREDENTIALS_ID}", variable: 'DEPLOY_PATH')
+                    string(credentialsId: "${DEPLOY_SSH_PASSWORD_CREDENTIALS_ID}", variable: 'SSH_PASS')
                 ]) {
                     sh '''
                         set -euo pipefail
                         set +x
 
-                        for name in SAKU_API_ENV_FILE REGISTRY DOCKER_USER DOCKER_PASS DEPLOY_HOST DEPLOY_SSH_PORT DEPLOY_SSH_USER SSH_PASS DEPLOY_PATH; do
+                        for name in SAKU_API_ENV_FILE REGISTRY DOCKER_USER DOCKER_PASS DEPLOY_HOST DEPLOY_SSH_PORT DEPLOY_SSH_USER SSH_PASS; do
                             eval "value=\\${$name:-}"
                             if [ -z "$value" ]; then
                                 echo "ERROR: required Jenkins credential value $name is empty." >&2
@@ -116,15 +114,6 @@ Alias       : ${NETWORK_ALIAS}:${CONTAINER_PORT}
                         case "$DEPLOY_SSH_PORT" in
                             *[!0-9]*|'')
                                 echo "ERROR: SSH port credential must be numeric." >&2
-                                exit 1
-                                ;;
-                        esac
-
-                        case "$DEPLOY_PATH" in
-                            /*)
-                                ;;
-                            *)
-                                echo "ERROR: deploy path credential must be an absolute path." >&2
                                 exit 1
                                 ;;
                         esac
@@ -227,8 +216,7 @@ Alias       : ${NETWORK_ALIAS}:${CONTAINER_PORT}
                     string(credentialsId: "${DEPLOY_HOST_CREDENTIALS_ID}", variable: 'DEPLOY_HOST'),
                     string(credentialsId: "${DEPLOY_SSH_PORT_CREDENTIALS_ID}", variable: 'DEPLOY_SSH_PORT'),
                     string(credentialsId: "${DEPLOY_SSH_USER_CREDENTIALS_ID}", variable: 'DEPLOY_SSH_USER'),
-                    string(credentialsId: "${DEPLOY_SSH_PASSWORD_CREDENTIALS_ID}", variable: 'SSH_PASS'),
-                    string(credentialsId: "${DEPLOY_PATH_CREDENTIALS_ID}", variable: 'DEPLOY_PATH')
+                    string(credentialsId: "${DEPLOY_SSH_PASSWORD_CREDENTIALS_ID}", variable: 'SSH_PASS')
                 ]) {
                     sh '''
                         set -euo pipefail
@@ -236,7 +224,7 @@ Alias       : ${NETWORK_ALIAS}:${CONTAINER_PORT}
 
                         ASKPASS_FILE="$(mktemp)"
                         DEPLOY_ENV_FILE="$(mktemp)"
-                        REMOTE_SECRET_DIR="/tmp/$APP_NAME.$BUILD_NUMBER"
+                        REMOTE_WORK_DIR="/tmp/$APP_NAME.$BUILD_NUMBER"
                         IMAGE_FULL="$REGISTRY/$IMAGE_NAME:$IMAGE_TAG"
 
                         cleanup_local() {
@@ -278,11 +266,11 @@ ENDASKPASS
                                 "$DEPLOY_SSH_USER@$DEPLOY_HOST" "$@"
                         }
 
-                        ssh_remote "rm -rf '$REMOTE_SECRET_DIR'; mkdir -p '$REMOTE_SECRET_DIR' '$DEPLOY_PATH'; chmod 700 '$REMOTE_SECRET_DIR'"
-                        printf '%s\n' "$DOCKER_PASS" | ssh_remote "umask 077; cat > '$REMOTE_SECRET_DIR/docker.pass'"
-                        printf '%s\n' "$SSH_PASS" | ssh_remote "umask 077; cat > '$REMOTE_SECRET_DIR/sudo.pass'"
-                        ssh_remote "umask 077; cat > '$REMOTE_SECRET_DIR/runtime.env'" < "$DEPLOY_ENV_FILE"
-                        ssh_remote "cat > '$DEPLOY_PATH/$COMPOSE_FILE'" < "$COMPOSE_FILE"
+                        ssh_remote "rm -rf '$REMOTE_WORK_DIR'; mkdir -p '$REMOTE_WORK_DIR'; chmod 700 '$REMOTE_WORK_DIR'"
+                        printf '%s\n' "$DOCKER_PASS" | ssh_remote "umask 077; cat > '$REMOTE_WORK_DIR/docker.pass'"
+                        printf '%s\n' "$SSH_PASS" | ssh_remote "umask 077; cat > '$REMOTE_WORK_DIR/sudo.pass'"
+                        ssh_remote "umask 077; cat > '$REMOTE_WORK_DIR/runtime.env'" < "$DEPLOY_ENV_FILE"
+                        ssh_remote "cat > '$REMOTE_WORK_DIR/$COMPOSE_FILE'" < "$COMPOSE_FILE"
 
                         ssh_remote "cat > /tmp/$APP_NAME-deploy.sh" << 'REMOTE_SCRIPT'
 #!/bin/sh
@@ -304,11 +292,11 @@ docker_cmd() {
 }
 
 cleanup() {
-    rm -rf "$REMOTE_SECRET_DIR" "/tmp/$APP_NAME-deploy.sh"
+    rm -rf "$REMOTE_WORK_DIR" "/tmp/$APP_NAME-deploy.sh"
 }
 trap cleanup EXIT
 
-cd "$DEPLOY_PATH"
+cd "$REMOTE_WORK_DIR"
 
 if ! docker_cmd network inspect "$DOCKER_NETWORK" >/dev/null 2>&1; then
     echo "Creating Docker network $DOCKER_NETWORK..."
@@ -318,17 +306,11 @@ fi
 echo "Authenticating remote Docker host to registry..."
 docker_cmd login "$REGISTRY" -u "$DOCKER_USER" --password-stdin < "$DOCKER_PASS_FILE"
 
-PREVIOUS_IMAGE="$(docker_cmd inspect --format='{{.Config.Image}}' "$APP_NAME" 2>/dev/null || true)"
-if [ -n "$PREVIOUS_IMAGE" ]; then
-    printf '%s\n' "$PREVIOUS_IMAGE" > .previous_image
-    echo "Previous image: $PREVIOUS_IMAGE"
-fi
-
-COMPOSE_ENV_FILE="$REMOTE_SECRET_DIR/runtime.env"
+COMPOSE_ENV_FILE="$REMOTE_WORK_DIR/runtime.env"
 
 echo "Deploying $IMAGE_FULL..."
-docker_cmd compose --env-file "$COMPOSE_ENV_FILE" -f "$COMPOSE_FILE" pull
-docker_cmd compose --env-file "$COMPOSE_ENV_FILE" -f "$COMPOSE_FILE" up -d --remove-orphans
+docker_cmd compose --project-name "$APP_NAME" --env-file "$COMPOSE_ENV_FILE" -f "$COMPOSE_FILE" pull
+docker_cmd compose --project-name "$APP_NAME" --env-file "$COMPOSE_ENV_FILE" -f "$COMPOSE_FILE" up -d --remove-orphans
 
 echo "Waiting for API health..."
 for i in $(seq 1 15); do
@@ -346,11 +328,6 @@ done
 echo "ERROR: new API container failed health check"
 docker_cmd logs --tail=160 "$APP_NAME" 2>&1 || true
 
-if [ -n "$PREVIOUS_IMAGE" ]; then
-    echo "Attempting rollback to $PREVIOUS_IMAGE..."
-    IMAGE_FULL="$PREVIOUS_IMAGE" docker_cmd compose --env-file "$COMPOSE_ENV_FILE" -f "$COMPOSE_FILE" up -d --remove-orphans || true
-fi
-
 docker_cmd logout "$REGISTRY" >/dev/null 2>&1 || true
 exit 1
 REMOTE_SCRIPT
@@ -365,10 +342,9 @@ REMOTE_SCRIPT
                             CONTAINER_PORT='$CONTAINER_PORT' \
                             HEALTH_PATH='$HEALTH_PATH' \
                             COMPOSE_FILE='$COMPOSE_FILE' \
-                            DEPLOY_PATH='$DEPLOY_PATH' \
-                            REMOTE_SECRET_DIR='$REMOTE_SECRET_DIR' \
-                            DOCKER_PASS_FILE='$REMOTE_SECRET_DIR/docker.pass' \
-                            SUDO_PASS_FILE='$REMOTE_SECRET_DIR/sudo.pass' \
+                            REMOTE_WORK_DIR='$REMOTE_WORK_DIR' \
+                            DOCKER_PASS_FILE='$REMOTE_WORK_DIR/docker.pass' \
+                            SUDO_PASS_FILE='$REMOTE_WORK_DIR/sudo.pass' \
                             /tmp/$APP_NAME-deploy.sh
                         "
                     '''
@@ -385,8 +361,7 @@ REMOTE_SCRIPT
                     string(credentialsId: "${DEPLOY_HOST_CREDENTIALS_ID}", variable: 'DEPLOY_HOST'),
                     string(credentialsId: "${DEPLOY_SSH_PORT_CREDENTIALS_ID}", variable: 'DEPLOY_SSH_PORT'),
                     string(credentialsId: "${DEPLOY_SSH_USER_CREDENTIALS_ID}", variable: 'DEPLOY_SSH_USER'),
-                    string(credentialsId: "${DEPLOY_SSH_PASSWORD_CREDENTIALS_ID}", variable: 'SSH_PASS'),
-                    string(credentialsId: "${DEPLOY_PATH_CREDENTIALS_ID}", variable: 'DEPLOY_PATH')
+                    string(credentialsId: "${DEPLOY_SSH_PASSWORD_CREDENTIALS_ID}", variable: 'SSH_PASS')
                 ]) {
                     sh '''
                         set -euo pipefail
@@ -451,8 +426,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-cd "$DEPLOY_PATH"
-
 if ! docker_cmd ps --filter "name=^/$APP_NAME\\$" --format "{{.Names}}" | grep -q "^$APP_NAME\\$"; then
     echo "ERROR: $APP_NAME is not running"
     docker_cmd logs --tail=160 "$APP_NAME" 2>&1 || true
@@ -474,8 +447,6 @@ REMOTE_VERIFY
                             DOCKER_NETWORK='$DOCKER_NETWORK' \
                             CONTAINER_PORT='$CONTAINER_PORT' \
                             HEALTH_PATH='$HEALTH_PATH' \
-                            COMPOSE_FILE='$COMPOSE_FILE' \
-                            DEPLOY_PATH='$DEPLOY_PATH' \
                             REMOTE_VERIFY_DIR='$REMOTE_VERIFY_DIR' \
                             SUDO_PASS_FILE='$REMOTE_VERIFY_DIR/sudo.pass' \
                             /tmp/$APP_NAME-verify.sh
