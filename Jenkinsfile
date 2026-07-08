@@ -20,7 +20,7 @@ pipeline {
         NETWORK_ALIAS = "api-saku-finance"
         CONTAINER_PORT = "4001"
         HEALTH_PATH = "/health"
-        COMPOSE_FILE = "docker-compose.yaml"
+        COMPOSE_FILE = "docker-compose.prd.yaml"
 
         DOCKER_BUILDKIT = "1"
     }
@@ -281,7 +281,7 @@ ENDASKPASS
                         ssh_remote "rm -rf '$REMOTE_SECRET_DIR'; mkdir -p '$REMOTE_SECRET_DIR' '$DEPLOY_PATH'; chmod 700 '$REMOTE_SECRET_DIR'"
                         printf '%s\n' "$DOCKER_PASS" | ssh_remote "umask 077; cat > '$REMOTE_SECRET_DIR/docker.pass'"
                         printf '%s\n' "$SSH_PASS" | ssh_remote "umask 077; cat > '$REMOTE_SECRET_DIR/sudo.pass'"
-                        ssh_remote "umask 077; cat > '$DEPLOY_PATH/.env'" < "$DEPLOY_ENV_FILE"
+                        ssh_remote "umask 077; cat > '$REMOTE_SECRET_DIR/runtime.env'" < "$DEPLOY_ENV_FILE"
                         ssh_remote "cat > '$DEPLOY_PATH/$COMPOSE_FILE'" < "$COMPOSE_FILE"
 
                         ssh_remote "cat > /tmp/$APP_NAME-deploy.sh" << 'REMOTE_SCRIPT'
@@ -324,9 +324,11 @@ if [ -n "$PREVIOUS_IMAGE" ]; then
     echo "Previous image: $PREVIOUS_IMAGE"
 fi
 
+COMPOSE_ENV_FILE="$REMOTE_SECRET_DIR/runtime.env"
+
 echo "Deploying $IMAGE_FULL..."
-docker_cmd compose --env-file .env -f "$COMPOSE_FILE" pull
-docker_cmd compose --env-file .env -f "$COMPOSE_FILE" up -d --remove-orphans
+docker_cmd compose --env-file "$COMPOSE_ENV_FILE" -f "$COMPOSE_FILE" pull
+docker_cmd compose --env-file "$COMPOSE_ENV_FILE" -f "$COMPOSE_FILE" up -d --remove-orphans
 
 echo "Waiting for API health..."
 for i in $(seq 1 15); do
@@ -346,7 +348,7 @@ docker_cmd logs --tail=160 "$APP_NAME" 2>&1 || true
 
 if [ -n "$PREVIOUS_IMAGE" ]; then
     echo "Attempting rollback to $PREVIOUS_IMAGE..."
-    IMAGE_FULL="$PREVIOUS_IMAGE" docker_cmd compose --env-file .env -f "$COMPOSE_FILE" up -d --remove-orphans || true
+    IMAGE_FULL="$PREVIOUS_IMAGE" docker_cmd compose --env-file "$COMPOSE_ENV_FILE" -f "$COMPOSE_FILE" up -d --remove-orphans || true
 fi
 
 docker_cmd logout "$REGISTRY" >/dev/null 2>&1 || true
@@ -463,7 +465,7 @@ if ! docker_cmd inspect "$APP_NAME" --format "{{json .NetworkSettings.Networks}}
 fi
 
 docker_cmd exec "$APP_NAME" wget -qO- "http://127.0.0.1:$CONTAINER_PORT$HEALTH_PATH" >/dev/null
-docker_cmd compose --env-file .env -f "$COMPOSE_FILE" ps
+docker_cmd ps --filter "name=^/$APP_NAME\\$"
 REMOTE_VERIFY
 
                         ssh_remote "

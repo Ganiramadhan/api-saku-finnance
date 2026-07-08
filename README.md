@@ -366,7 +366,7 @@ Services included:
 
 # CI/CD Deployment
 
-Production deployment uses `docker-compose.prd.yaml` and Jenkins. The pipeline builds the Go API image, pushes it to the registry, uploads the production compose file and secret `.env` to the server deploy directory, then runs `docker compose up -d` with a health check and rollback image tracking.
+Production deployment uses `docker-compose.prd.yaml` and Jenkins. The pipeline builds the Go API image, pushes it to the registry, uploads the production compose file to the server deploy directory, passes the runtime environment from a Jenkins secret file during deploy, then runs `docker compose up -d` with a health check and rollback image tracking.
 
 Expected Jenkins credentials:
 
@@ -384,11 +384,10 @@ The server deploy directory is expected to contain:
 
 ```text
 docker-compose.prd.yaml
-.env
 .previous_image
 ```
 
-The API is attached to the `saku-finance` Docker network with alias `api-saku-finance` and listens on internal port `4001`.
+The production `.env` is not kept in the deploy directory. Jenkins writes it to a temporary remote directory for the deploy command and removes it after the deployment script exits. The API is attached to the `saku-finance` Docker network with alias `api-saku-finance` and listens on internal port `4001`.
 
 ---
 
