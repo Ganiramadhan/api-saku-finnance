@@ -6,6 +6,7 @@ import (
 
 	"github.com/ganiramadhan/starter-go/internal/domain"
 	"github.com/ganiramadhan/starter-go/internal/dto"
+	"github.com/ganiramadhan/starter-go/internal/platform/monitoring"
 	"github.com/ganiramadhan/starter-go/pkg/httpx"
 	"github.com/gofiber/fiber/v2"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -30,11 +31,32 @@ func ErrorHandler(c *fiber.Ctx, err error) error {
 	case errors.Is(err, domain.ErrInvalidCredentials):
 		code = fiber.StatusUnauthorized
 		message = err.Error()
+	case errors.Is(err, domain.ErrAccountNotVerified):
+		code = fiber.StatusForbidden
+		message = err.Error()
 	case errors.Is(err, domain.ErrUnauthorized):
 		code = fiber.StatusUnauthorized
 		message = err.Error()
+	case errors.Is(err, domain.ErrForbidden):
+		code = fiber.StatusForbidden
+		message = err.Error()
 	case errors.Is(err, domain.ErrInvalidInput):
 		code = fiber.StatusBadRequest
+		message = err.Error()
+	case errors.Is(err, domain.ErrGmailRequired):
+		code = fiber.StatusBadRequest
+		message = err.Error()
+	case errors.Is(err, domain.ErrInvalidReferral):
+		code = fiber.StatusBadRequest
+		message = err.Error()
+	case errors.Is(err, domain.ErrInvalidVoucher):
+		code = fiber.StatusBadRequest
+		message = strings.TrimPrefix(err.Error(), domain.ErrInvalidVoucher.Error()+": ")
+	case errors.Is(err, domain.ErrInvalidOTP):
+		code = fiber.StatusBadRequest
+		message = err.Error()
+	case errors.Is(err, domain.ErrEmailNotRegistered):
+		code = fiber.StatusNotFound
 		message = err.Error()
 	default:
 		var pgErr *pgconn.PgError
@@ -56,6 +78,8 @@ func ErrorHandler(c *fiber.Ctx, err error) error {
 	if ve := httpx.ValidationFromCtx(c); ve != nil {
 		data = fiber.Map{"errors": ve.Errors}
 	}
+
+	monitoring.CaptureFiberError(c, err, code)
 
 	return c.Status(code).JSON(dto.APIResponse{
 		Status:  "error",

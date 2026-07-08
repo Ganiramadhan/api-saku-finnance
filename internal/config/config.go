@@ -11,15 +11,19 @@ import (
 )
 
 type Config struct {
-	App      AppConfig
-	Database DatabaseConfig
-	Redis    RedisConfig
-	JWT      JWTConfig
-	CORS     CORSConfig
-	S3       S3Config
-	Claude   ClaudeConfig
-	Google   GoogleConfig
-	Midtrans MidtransConfig
+	App       AppConfig
+	Database  DatabaseConfig
+	Redis     RedisConfig
+	JWT       JWTConfig
+	CORS      CORSConfig
+	S3        S3Config
+	Claude    ClaudeConfig
+	Google    GoogleConfig
+	Turnstile TurnstileConfig
+	Midtrans  MidtransConfig
+	Mail      MailConfig
+	Telegram  TelegramConfig
+	Sentry    SentryConfig
 }
 
 type AppConfig struct {
@@ -74,10 +78,36 @@ type GoogleConfig struct {
 	ClientID string
 }
 
+type TurnstileConfig struct {
+	SecretKey string
+}
+
 type MidtransConfig struct {
 	ServerKey    string
 	ClientKey    string
 	IsProduction bool
+}
+
+type MailConfig struct {
+	Mailer     string
+	Host       string
+	Port       string
+	Username   string
+	Password   string
+	Encryption string
+	FromEmail  string
+	FromName   string
+}
+
+type TelegramConfig struct {
+	BotToken      string
+	WebhookSecret string
+}
+
+type SentryConfig struct {
+	DSN              string
+	Environment      string
+	TracesSampleRate float64
 }
 
 func Load() *Config {
@@ -89,7 +119,6 @@ func Load() *Config {
 	redisDB := mustGetEnvInt("REDIS_DB")
 	redisPool := mustGetEnvInt("REDIS_POOL_SIZE")
 	jwtTTLHours := mustGetEnvInt("JWT_TTL_HOURS")
-
 	return &Config{
 		App: AppConfig{
 			Port: mustGetEnv("APP_PORT"),
@@ -135,10 +164,32 @@ func Load() *Config {
 		Google: GoogleConfig{
 			ClientID: os.Getenv("GOOGLE_CLIENT_ID"),
 		},
+		Turnstile: TurnstileConfig{
+			SecretKey: os.Getenv("TURNSTILE_SECRET_KEY"),
+		},
 		Midtrans: MidtransConfig{
 			ServerKey:    os.Getenv("MIDTRANS_SERVER_KEY"),
 			ClientKey:    os.Getenv("MIDTRANS_CLIENT_KEY"),
 			IsProduction: os.Getenv("MIDTRANS_IS_PROD") == "true",
+		},
+		Mail: MailConfig{
+			Mailer:     getEnvOrDefault("MAIL_MAILER", "smtp"),
+			Host:       os.Getenv("MAIL_HOST"),
+			Port:       getEnvOrDefault("MAIL_PORT", "587"),
+			Username:   os.Getenv("MAIL_USERNAME"),
+			Password:   os.Getenv("MAIL_PASSWORD"),
+			Encryption: getEnvOrDefault("MAIL_ENCRYPTION", "tls"),
+			FromEmail:  os.Getenv("MAIL_FROM_ADDRESS"),
+			FromName:   getEnvOrDefault("MAIL_FROM_NAME", "SAKU"),
+		},
+		Telegram: TelegramConfig{
+			BotToken:      os.Getenv("TELEGRAM_BOT_TOKEN"),
+			WebhookSecret: os.Getenv("TELEGRAM_WEBHOOK_SECRET"),
+		},
+		Sentry: SentryConfig{
+			DSN:              os.Getenv("SENTRY_DSN"),
+			Environment:      getEnvOrDefault("SENTRY_ENVIRONMENT", getEnvOrDefault("APP_ENV", "production")),
+			TracesSampleRate: getEnvFloatOrDefault("SENTRY_TRACES_SAMPLE_RATE", 0.05),
 		},
 	}
 }
@@ -196,6 +247,25 @@ func mustGetEnvInt(key string) int {
 	n, err := strconv.Atoi(v)
 	if err != nil {
 		log.Fatalf("config: invalid integer value for %s: %q", key, v)
+	}
+	return n
+}
+
+func getEnvFloatOrDefault(key string, defaultVal float64) float64 {
+	v := os.Getenv(key)
+	if v == "" {
+		return defaultVal
+	}
+	n, err := strconv.ParseFloat(v, 64)
+	if err != nil {
+		log.Printf("config: invalid float value for %s: %q, using %.2f", key, v, defaultVal)
+		return defaultVal
+	}
+	if n < 0 {
+		return 0
+	}
+	if n > 1 {
+		return 1
 	}
 	return n
 }

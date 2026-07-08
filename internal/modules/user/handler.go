@@ -61,8 +61,63 @@ func (h *Handler) UpdateMe(c *fiber.Ctx) error {
 	if err := httpx.Bind(c, h.validator, &req); err != nil {
 		return err
 	}
-	req.Role = "" // prevent self-elevation
+	req.Role = ""  // prevent self-elevation
+	req.Email = "" // email changes require password via PUT /users/me/email
 	u, err := h.service.Update(c.Context(), uid, req)
+	if err != nil {
+		return err
+	}
+	return httpx.OK(c, constants.MsgUpdateUser, u)
+}
+
+// ChangeEmail godoc
+// @Summary   Change my email
+// @Description Updates the account email after verifying the current password.
+// @Tags      Users
+// @Accept    json
+// @Produce   json
+// @Param     request  body  dto.ChangeEmailRequest  true  "New email and current password"
+// @Success   200  {object}  dto.APIResponse{data=dto.UserResponse}
+// @Security  BearerAuth
+// @Router    /api/v1/users/me/email [put]
+func (h *Handler) ChangeEmail(c *fiber.Ctx) error {
+	uid, err := httpx.UserID(c)
+	if err != nil {
+		return err
+	}
+	var req dto.ChangeEmailRequest
+	if err := httpx.Bind(c, h.validator, &req); err != nil {
+		return err
+	}
+	u, err := h.service.ChangeEmail(c.Context(), uid, req)
+	if err != nil {
+		return err
+	}
+	return httpx.OK(c, constants.MsgUpdateUser, u)
+}
+
+func (h *Handler) BindTelegram(c *fiber.Ctx) error {
+	uid, err := httpx.UserID(c)
+	if err != nil {
+		return err
+	}
+	var req dto.BindTelegramRequest
+	if err := httpx.Bind(c, h.validator, &req); err != nil {
+		return err
+	}
+	u, err := h.service.BindTelegram(c.Context(), uid, req)
+	if err != nil {
+		return err
+	}
+	return httpx.OK(c, constants.MsgUpdateUser, u)
+}
+
+func (h *Handler) DisconnectTelegram(c *fiber.Ctx) error {
+	uid, err := httpx.UserID(c)
+	if err != nil {
+		return err
+	}
+	u, err := h.service.DisconnectTelegram(c.Context(), uid)
 	if err != nil {
 		return err
 	}
@@ -71,7 +126,7 @@ func (h *Handler) UpdateMe(c *fiber.Ctx) error {
 
 // UploadPhoto godoc
 // @Summary   Upload user photo
-// @Description Uploads an image to temp/users/. Returns the object key — pass it as `photo` to PUT /users/me (or admin Create/Update) to attach it to a user.
+// @Description Uploads an optimized WebP image to Temp/Users/. Returns the object key — pass it as `photo` to PUT /users/me (or admin Create/Update) to attach it to a user.
 // @Tags      Users
 // @Accept    multipart/form-data
 // @Produce   json
@@ -96,7 +151,7 @@ func (h *Handler) UploadPhoto(c *fiber.Ctx) error {
 	}
 
 	ctx := c.Context()
-	key, err := h.storage.Upload(ctx, file, "temp/users")
+	key, err := h.storage.Upload(ctx, file, "Temp/Users")
 	if err != nil {
 		return fiber.NewError(http.StatusInternalServerError, constants.ErrUploadFailed+": "+err.Error())
 	}
@@ -130,6 +185,33 @@ func (h *Handler) DeleteMyPhoto(c *fiber.Ctx) error {
 		return err
 	}
 	return httpx.OK(c, constants.MsgDeleteUserPhoto, u)
+}
+
+// DeleteMe godoc
+// @Summary   Delete my account
+// @Tags      Users
+// @Produce   json
+// @Success   200  {object}  dto.APIResponse
+// @Security  BearerAuth
+// @Router    /api/v1/users/me [delete]
+func (h *Handler) DeleteMe(c *fiber.Ctx) error {
+	uid, err := httpx.UserID(c)
+	if err != nil {
+		return err
+	}
+	if err := h.service.Delete(c.Context(), uid); err != nil {
+		return err
+	}
+	c.Cookie(&fiber.Cookie{
+		Name:     "saku_session",
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HTTPOnly: true,
+		Secure:   c.Protocol() == "https",
+		SameSite: fiber.CookieSameSiteLaxMode,
+	})
+	return httpx.OK(c, constants.MsgDeleteUser, nil)
 }
 
 // List godoc

@@ -1,19 +1,22 @@
 package splitbill
 
 import (
+	"github.com/ganiramadhan/starter-go/internal/domain"
 	"github.com/ganiramadhan/starter-go/internal/dto"
+	"github.com/ganiramadhan/starter-go/internal/modules/subscription"
 	"github.com/ganiramadhan/starter-go/pkg/httpx"
 	"github.com/ganiramadhan/starter-go/pkg/validator"
 	"github.com/gofiber/fiber/v2"
 )
 
 type Handler struct {
-	service   Service
-	validator *validator.Validator
+	service      Service
+	validator    *validator.Validator
+	subscription subscription.Service
 }
 
-func NewHandler(s Service, v *validator.Validator) *Handler {
-	return &Handler{service: s, validator: v}
+func NewHandler(s Service, v *validator.Validator, sub subscription.Service) *Handler {
+	return &Handler{service: s, validator: v, subscription: sub}
 }
 
 // List godoc
@@ -73,6 +76,16 @@ func (h *Handler) Create(c *fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
+
+	// Check pro subscription
+	hasPro, err := h.subscription.HasActiveProSubscription(c.Context(), uid)
+	if err != nil {
+		return err
+	}
+	if !hasPro {
+		return domain.ErrProSubscriptionRequired
+	}
+
 	var req dto.CreateSplitBillRequest
 	if err := httpx.Bind(c, h.validator, &req); err != nil {
 		return err
@@ -99,6 +112,16 @@ func (h *Handler) Update(c *fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
+
+	// Check pro subscription
+	hasPro, err := h.subscription.HasActiveProSubscription(c.Context(), uid)
+	if err != nil {
+		return err
+	}
+	if !hasPro {
+		return domain.ErrProSubscriptionRequired
+	}
+
 	id, err := httpx.ParseUUID(c, "id")
 	if err != nil {
 		return err
@@ -127,6 +150,16 @@ func (h *Handler) Delete(c *fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
+
+	// Check pro subscription
+	hasPro, err := h.subscription.HasActiveProSubscription(c.Context(), uid)
+	if err != nil {
+		return err
+	}
+	if !hasPro {
+		return domain.ErrProSubscriptionRequired
+	}
+
 	id, err := httpx.ParseUUID(c, "id")
 	if err != nil {
 		return err
@@ -153,6 +186,16 @@ func (h *Handler) MarkParticipantPaid(c *fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
+
+	// Check pro subscription
+	hasPro, err := h.subscription.HasActiveProSubscription(c.Context(), uid)
+	if err != nil {
+		return err
+	}
+	if !hasPro {
+		return domain.ErrProSubscriptionRequired
+	}
+
 	billID, err := httpx.ParseUUID(c, "id")
 	if err != nil {
 		return err
@@ -187,6 +230,16 @@ func (h *Handler) Share(c *fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
+
+	// Check pro subscription
+	hasPro, err := h.subscription.HasActiveProSubscription(c.Context(), uid)
+	if err != nil {
+		return err
+	}
+	if !hasPro {
+		return domain.ErrProSubscriptionRequired
+	}
+
 	id, err := httpx.ParseUUID(c, "id")
 	if err != nil {
 		return err

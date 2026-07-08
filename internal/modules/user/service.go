@@ -2,8 +2,10 @@ package user
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
+	"regexp"
 	"strings"
 	"time"
 
@@ -16,17 +18,22 @@ import (
 
 const (
 	photoURLTTL         = 24 * time.Hour
-	uploadFolderUserTmp = "temp/users"
-	userPhotoTemplate   = "users/%s/%s"
+	uploadFolderUserTmp = "Temp/Users"
+	userPhotoTemplate   = "Users/%s/%s"
 )
+
+var telegramChatIDPattern = regexp.MustCompile(`^[1-9][0-9]{4,19}$`)
 
 type Service interface {
 	List(ctx context.Context, page, limit int, search string) ([]dto.UserResponse, *dto.PaginationMeta, error)
 	Get(ctx context.Context, id uuid.UUID) (*dto.UserResponse, error)
 	Create(ctx context.Context, req dto.CreateUserRequest) (*dto.UserResponse, error)
 	Update(ctx context.Context, id uuid.UUID, req dto.UpdateUserRequest) (*dto.UserResponse, error)
+	ChangeEmail(ctx context.Context, id uuid.UUID, req dto.ChangeEmailRequest) (*dto.UserResponse, error)
 	Delete(ctx context.Context, id uuid.UUID) error
 	DeletePhoto(ctx context.Context, id uuid.UUID) (*dto.UserResponse, error)
+	BindTelegram(ctx context.Context, id uuid.UUID, req dto.BindTelegramRequest) (*dto.UserResponse, error)
+	DisconnectTelegram(ctx context.Context, id uuid.UUID) (*dto.UserResponse, error)
 }
 
 type service struct {
@@ -76,6 +83,9 @@ func (s *service) Create(ctx context.Context, req dto.CreateUserRequest) (*dto.U
 	role := req.Role
 	if role == "" {
 		role = "user"
+	}
+	if role == "super_admin" {
+		return nil, domain.ErrInvalidInput
 	}
 	status := req.Status
 	if status == "" {
@@ -137,6 +147,9 @@ func (s *service) Update(ctx context.Context, id uuid.UUID, req dto.UpdateUserRe
 		u.Password = string(hashed)
 	}
 	if req.Role != "" {
+		if req.Role == "super_admin" {
+			return nil, domain.ErrInvalidInput
+		}
 		u.Role = req.Role
 	}
 	if req.Phone != "" {
@@ -144,6 +157,9 @@ func (s *service) Update(ctx context.Context, id uuid.UUID, req dto.UpdateUserRe
 	}
 	if req.Status != "" {
 		u.Status = req.Status
+	}
+	if req.CashflowStartDay != nil {
+		u.CashflowStartDay = *req.CashflowStartDay
 	}
 
 	oldPhoto := u.Photo
@@ -176,6 +192,29 @@ func (s *service) Update(ctx context.Context, id uuid.UUID, req dto.UpdateUserRe
 		}
 	}
 
+	r := s.toResponse(ctx, *u)
+	return &r, nil
+}
+
+func (s *service) ChangeEmail(ctx context.Context, id uuid.UUID, req dto.ChangeEmailRequest) (*dto.UserResponse, error) {
+	u, err := s.repo.FindByID(id)
+	if err != nil {
+		return nil, err
+	}
+	email := sanitizeEmail(req.Email)
+	if email == "" {
+		return nil, domain.ErrInvalidInput
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(u.Password), []byte(req.Password)); err != nil {
+		return nil, domain.ErrInvalidCredentials
+	}
+	if existing, _ := s.repo.FindByEmail(email); existing != nil && existing.ID != id {
+		return nil, domain.ErrAlreadyExists
+	}
+	u.Email = email
+	if err := s.repo.Update(u); err != nil {
+		return nil, err
+	}
 	r := s.toResponse(ctx, *u)
 	return &r, nil
 }
@@ -213,24 +252,78 @@ func (s *service) DeletePhoto(ctx context.Context, id uuid.UUID) (*dto.UserRespo
 	return &r, nil
 }
 
+func (s *service) BindTelegram(ctx context.Context, id uuid.UUID, req dto.BindTelegramRequest) (*dto.UserResponse, error) {
+	chatID := strings.TrimSpace(req.ChatID)
+	if !telegramChatIDPattern.MatchString(chatID) {
+		return nil, fmt.Errorf("%w: Telegram Chat ID tidak valid", domain.ErrInvalidInput)
+	}
+	u, err := s.repo.FindByID(id)
+	if err != nil {
+		return nil, err
+	}
+	if existing, err := s.repo.FindByTelegramChatID(chatID); err == nil && existing.ID != id {
+		return nil, fmt.Errorf("%w: Telegram Chat ID sudah terhubung ke akun lain", domain.ErrAlreadyExists)
+	} else if err != nil && !errors.Is(err, domain.ErrNotFound) {
+		return nil, err
+	}
+	u.TelegramChatID = &chatID
+	if err := s.repo.Update(u); err != nil {
+		return nil, err
+	}
+	r := s.toResponse(ctx, *u)
+	return &r, nil
+}
+
+func (s *service) DisconnectTelegram(ctx context.Context, id uuid.UUID) (*dto.UserResponse, error) {
+	u, err := s.repo.FindByID(id)
+	if err != nil {
+		return nil, err
+	}
+	u.TelegramChatID = nil
+	if err := s.repo.Update(u); err != nil {
+		return nil, err
+	}
+	r := s.toResponse(ctx, *u)
+	return &r, nil
+}
+
 func (s *service) toResponse(ctx context.Context, u domain.User) dto.UserResponse {
 	resp := dto.UserResponse{
-		ID:        u.ID,
-		Name:      u.Name,
-		Email:     u.Email,
-		Role:      u.Role,
-		Phone:     u.Phone,
-		Status:    u.Status,
-		Photo:     u.Photo,
-		CreatedAt: u.CreatedAt,
-		UpdatedAt: u.UpdatedAt,
+		ID:               u.ID,
+		Name:             u.Name,
+		Email:            u.Email,
+		Role:             u.Role,
+		AuthProvider:     u.AuthProvider,
+		Phone:            u.Phone,
+		Status:           u.Status,
+		Photo:            u.Photo,
+		CashflowStartDay: u.CashflowStartDay,
+		LastLoginAt:      u.LastLoginAt,
+		CreatedAt:        u.CreatedAt,
+		UpdatedAt:        u.UpdatedAt,
+	}
+	if u.TelegramChatID != nil {
+		resp.TelegramChatID = *u.TelegramChatID
+	}
+	if u.TelegramUsername != nil {
+		resp.TelegramUsername = *u.TelegramUsername
+	}
+	if u.Referral != nil {
+		resp.ReferralCode = u.Referral.Code
+		resp.ReferralReward = u.Referral.Reward
 	}
 	if u.Photo != "" {
-		if url, err := s.storage.PresignedURL(ctx, u.Photo, photoURLTTL); err == nil {
+		if strings.HasPrefix(u.Photo, "http://") || strings.HasPrefix(u.Photo, "https://") {
+			resp.PhotoURL = u.Photo
+		} else if url, err := s.storage.PresignedURL(ctx, u.Photo, photoURLTTL); err == nil {
 			resp.PhotoURL = url
 		}
 	}
 	return resp
+}
+
+func sanitizeEmail(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
 }
 
 func buildUserPhotoKey(id uuid.UUID, srcKey string) string {

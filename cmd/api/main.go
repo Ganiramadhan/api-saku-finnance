@@ -19,12 +19,19 @@ import (
 
 	"github.com/ganiramadhan/starter-go/internal/app"
 	"github.com/ganiramadhan/starter-go/internal/config"
+	"github.com/ganiramadhan/starter-go/internal/platform/monitoring"
 )
 
 var version = "dev"
 
 func main() {
 	cfg := config.Load()
+
+	flushSentry, err := monitoring.InitSentry(cfg.Sentry)
+	if err != nil {
+		log.Printf("monitoring: sentry disabled: %v", err)
+	}
+	defer flushSentry()
 
 	log.Printf("app: starting starter-go (version=%s, env=%s)", version, cfg.App.Env)
 

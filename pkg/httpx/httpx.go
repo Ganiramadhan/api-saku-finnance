@@ -33,6 +33,9 @@ func Bind(c *fiber.Ctx, v *validator.Validator, dst any) error {
 	if err := c.BodyParser(dst); err != nil {
 		return fiber.NewError(http.StatusBadRequest, constants.ErrInvalidRequest)
 	}
+	if sanitizer, ok := dst.(interface{ Sanitize() }); ok {
+		sanitizer.Sanitize()
+	}
 	if v == nil {
 		return nil
 	}

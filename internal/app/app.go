@@ -2,13 +2,16 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/ganiramadhan/starter-go/internal/config"
+	"github.com/ganiramadhan/starter-go/internal/domain"
 	"github.com/ganiramadhan/starter-go/internal/dto"
 	"github.com/ganiramadhan/starter-go/internal/middleware"
 	aimodule "github.com/ganiramadhan/starter-go/internal/modules/ai"
@@ -16,15 +19,21 @@ import (
 	"github.com/ganiramadhan/starter-go/internal/modules/auth"
 	"github.com/ganiramadhan/starter-go/internal/modules/budget"
 	"github.com/ganiramadhan/starter-go/internal/modules/category"
+	"github.com/ganiramadhan/starter-go/internal/modules/notification"
 	"github.com/ganiramadhan/starter-go/internal/modules/savingsgoal"
 	"github.com/ganiramadhan/starter-go/internal/modules/splitbill"
 	"github.com/ganiramadhan/starter-go/internal/modules/subscription"
+	"github.com/ganiramadhan/starter-go/internal/modules/support"
+	"github.com/ganiramadhan/starter-go/internal/modules/telegram"
 	"github.com/ganiramadhan/starter-go/internal/modules/transaction"
+	"github.com/ganiramadhan/starter-go/internal/modules/upcomingbilling"
 	"github.com/ganiramadhan/starter-go/internal/modules/user"
 	"github.com/ganiramadhan/starter-go/internal/modules/wallet"
 	aiplatform "github.com/ganiramadhan/starter-go/internal/platform/ai"
 	"github.com/ganiramadhan/starter-go/internal/platform/cache"
 	"github.com/ganiramadhan/starter-go/internal/platform/database"
+	"github.com/ganiramadhan/starter-go/internal/platform/mailer"
+	"github.com/ganiramadhan/starter-go/internal/platform/monitoring"
 	"github.com/ganiramadhan/starter-go/internal/platform/storage"
 	"github.com/ganiramadhan/starter-go/internal/routes"
 	"github.com/ganiramadhan/starter-go/pkg/jwt"
@@ -49,6 +58,7 @@ type App struct {
 	storage   storage.Storage
 	validator *validator.Validator
 	subSvc    subscription.Service
+	stopJobs  context.CancelFunc
 }
 
 func New(cfg *config.Config) (*App, error) {
@@ -143,7 +153,7 @@ func (a *App) initStorage() error {
 
 func (a *App) initHTTP() {
 	a.fiber = fiber.New(fiber.Config{
-		AppName:      "Starter Go API",
+		AppName:      "SAKU API",
 		BodyLimit:    10 * 1024 * 1024,
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
@@ -157,10 +167,16 @@ func (a *App) initHTTP() {
 		TimeFormat: "2006-01-02 15:04:05",
 	}))
 	a.fiber.Use(recover.New())
+	if strings.TrimSpace(a.cfg.Sentry.DSN) != "" {
+		a.fiber.Use(monitoring.NewFiberMiddleware())
+		a.fiber.Use(monitoring.EnrichFiberContext)
+	}
+	a.fiber.Use(middleware.SecurityHeaders())
 	a.fiber.Use(cors.New(cors.Config{
-		AllowOrigins: a.cfg.CORS.AllowOrigins,
-		AllowMethods: "GET,POST,PUT,DELETE,OPTIONS",
-		AllowHeaders: "Origin,Content-Type,Accept,Authorization,X-Request-ID",
+		AllowOrigins:     a.cfg.CORS.AllowOrigins,
+		AllowMethods:     "GET,POST,PUT,PATCH,DELETE,OPTIONS",
+		AllowHeaders:     "Origin,Content-Type,Accept,Authorization,X-Request-ID",
+		AllowCredentials: true,
 	}))
 
 	a.fiber.Get("/health", a.healthCheck)
@@ -178,11 +194,28 @@ func (a *App) initHTTP() {
 	goalRepo := savingsgoal.NewRepository(a.db)
 	splitRepo := splitbill.NewRepository(a.db)
 	subRepo := subscription.NewRepository(a.db)
+	billingRepo := upcomingbilling.NewRepository(a.db)
+	notificationRepo := notification.NewRepository(a.db)
+	supportRepo := support.NewRepository(a.db)
+	mailClient := mailer.New(mailer.Config{
+		Mailer:     a.cfg.Mail.Mailer,
+		Host:       a.cfg.Mail.Host,
+		Port:       a.cfg.Mail.Port,
+		Username:   a.cfg.Mail.Username,
+		Password:   a.cfg.Mail.Password,
+		Encryption: a.cfg.Mail.Encryption,
+		FromEmail:  a.cfg.Mail.FromEmail,
+		FromName:   a.cfg.Mail.FromName,
+	})
+	mailClient = mailer.NewAsync(mailClient, 200)
 
 	// Services
 	userSvc := user.NewService(userRepo, a.storage)
-	authSvc := auth.NewService(userRepo, jwtMgr, a.cfg.Google.ClientID)
-	walletSvc := wallet.NewService(walletRepo)
+	authSvc := auth.NewService(userRepo, jwtMgr, a.cfg.Google.ClientID, mailClient)
+	midtransClient := subscription.NewMidtransClient(a.cfg.Midtrans.ServerKey, a.cfg.Midtrans.IsProduction)
+	subSvc := subscription.NewService(subRepo, userRepo, midtransClient, mailClient, a.cfg.Midtrans.ClientKey, a.cfg.Midtrans.IsProduction)
+	a.subSvc = subSvc
+	walletSvc := wallet.NewService(walletRepo, subSvc)
 	categorySvc := category.NewService(categoryRepo)
 	txnSvc := transaction.NewService(txnRepo, walletRepo, categoryRepo)
 	txnExportSvc := transaction.NewExportService(txnRepo, walletRepo, categoryRepo)
@@ -190,19 +223,20 @@ func (a *App) initHTTP() {
 	budgetSvc := budget.NewService(budgetRepo, walletRepo, categoryRepo)
 	goalSvc := savingsgoal.NewService(goalRepo)
 	splitSvc := splitbill.NewService(splitRepo)
-	midtransClient := subscription.NewMidtransClient(a.cfg.Midtrans.ServerKey, a.cfg.Midtrans.IsProduction)
-	subSvc := subscription.NewService(subRepo, userRepo, midtransClient, a.cfg.Midtrans.ClientKey, a.cfg.Midtrans.IsProduction)
-	a.subSvc = subSvc
+	billingSvc := upcomingbilling.NewService(billingRepo, subSvc)
+	notificationSvc := notification.NewService(notificationRepo)
+	supportSvc := support.NewService(supportRepo, a.storage)
 
 	// AI (Claude)
 	claudeClient := aiplatform.NewClient(a.cfg.Claude.APIKey, a.cfg.Claude.Model)
-	aiSvc := aimodule.NewService(claudeClient, txnRepo, categoryRepo, aiLogSvc, a.storage, a.cfg.Claude.Model)
+	aiSvc := aimodule.NewService(claudeClient, txnRepo, walletRepo, categoryRepo, aiLogSvc, a.storage, a.cfg.Claude.Model, subSvc)
+	telegramSvc := telegram.NewService(userRepo, walletRepo, categoryRepo, txnSvc, aiSvc, telegram.NewHTTPClient(a.cfg.Telegram.BotToken))
 
 	txnHandler := transaction.NewHandler(txnSvc, a.validator)
 	txnHandler.SetExportService(txnExportSvc)
 
-	routes.Register(a.fiber, routes.Handlers{
-		Auth:         auth.NewHandler(authSvc, a.validator),
+	handlers := routes.Handlers{
+		Auth:         auth.NewHandler(authSvc, a.validator, a.cfg.Turnstile.SecretKey),
 		User:         user.NewHandler(userSvc, a.storage, a.validator),
 		Wallet:       wallet.NewHandler(walletSvc, a.validator),
 		Category:     category.NewHandler(categorySvc, a.validator),
@@ -211,9 +245,234 @@ func (a *App) initHTTP() {
 		Budget:       budget.NewHandler(budgetSvc, a.validator),
 		SavingsGoal:  savingsgoal.NewHandler(goalSvc, a.validator),
 		Subscription: subscription.NewHandler(subSvc, a.validator),
-		SplitBill:    splitbill.NewHandler(splitSvc, a.validator),
+		SplitBill:    splitbill.NewHandler(splitSvc, a.validator, subSvc),
+		Billing:      upcomingbilling.NewHandler(billingSvc, a.validator),
 		AI:           aimodule.NewHandler(aiSvc, a.validator),
-	}, jwtMgr)
+		Notification: notification.NewHandler(notificationSvc, a.validator),
+		Telegram:     telegram.NewHandler(telegramSvc, a.validator, a.cfg.Telegram.WebhookSecret),
+	}.WithSupport(support.NewHandler(supportSvc, a.storage, a.validator))
+	routes.Register(a.fiber, handlers, jwtMgr)
+
+	a.startReminderJob(billingRepo, subRepo, notificationSvc, mailClient)
+}
+
+func (a *App) startReminderJob(
+	billingRepo upcomingbilling.Repository,
+	subRepo subscription.Repository,
+	notificationSvc notification.Service,
+	mailClient mailer.Mailer,
+) {
+	ctx, cancel := context.WithCancel(context.Background())
+	a.stopJobs = cancel
+	go func() {
+		a.expirePendingSubscriptions(subRepo)
+		a.cleanupTempStorage()
+		a.runReminderPass(ctx, billingRepo, subRepo, notificationSvc, mailClient)
+		reminderTicker := time.NewTicker(24 * time.Hour)
+		expiryTicker := time.NewTicker(5 * time.Minute)
+		storageTicker := time.NewTicker(1 * time.Hour)
+		defer reminderTicker.Stop()
+		defer expiryTicker.Stop()
+		defer storageTicker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-expiryTicker.C:
+				a.expirePendingSubscriptions(subRepo)
+			case <-storageTicker.C:
+				a.cleanupTempStorage()
+			case <-reminderTicker.C:
+				a.expirePendingSubscriptions(subRepo)
+				a.runReminderPass(ctx, billingRepo, subRepo, notificationSvc, mailClient)
+			}
+		}
+	}()
+}
+
+func (a *App) expirePendingSubscriptions(subRepo subscription.Repository) {
+	if err := subRepo.ExpirePendingBefore(time.Now().UTC()); err != nil {
+		log.Printf("subscription cleanup: expire pending subscriptions: %v", err)
+	}
+}
+
+func (a *App) cleanupTempStorage() {
+	if a.storage == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	deleted, err := a.storage.DeletePrefixOlderThan(ctx, "Temp/", 24*time.Hour)
+	if err != nil {
+		log.Printf("storage cleanup: delete temp objects: %v", err)
+		return
+	}
+	if deleted > 0 {
+		log.Printf("storage cleanup: deleted %d temp objects", deleted)
+	}
+}
+
+func (a *App) runReminderPass(
+	ctx context.Context,
+	billingRepo upcomingbilling.Repository,
+	subRepo subscription.Repository,
+	notificationSvc notification.Service,
+	mailClient mailer.Mailer,
+) {
+	today := time.Now().UTC()
+	if billings, err := billingRepo.ListActiveWithUsers(); err != nil {
+		log.Printf("reminder: list upcoming billings: %v", err)
+	} else {
+		for _, item := range billings {
+			if item.User == nil || daysUntilUTC(today, item.DueDate) != 7 {
+				continue
+			}
+			title := "Bill reminder in 7 days"
+			message := fmt.Sprintf("%s is due on %s for %s.", item.Name, item.DueDate.Format("02 Jan 2006"), formatMoney(item.Amount, item.Currency))
+			_ = notificationSvc.Create(ctx, domain.Notification{
+				UserID: item.UserID, Type: "upcoming_billing_reminder", Title: title, Message: message, RefType: "upcoming_billing", RefID: item.ID.String(),
+			})
+			_ = mailClient.Send(
+				item.User.Email,
+				title,
+				billReminderEmailHTML(item.User.Name, item.Name, item.Amount, item.Currency, item.DueDate),
+			)
+		}
+	}
+
+	subs, err := subRepo.ListActiveForReminder()
+	if err != nil {
+		log.Printf("reminder: list subscriptions: %v", err)
+		return
+	}
+	for _, sub := range subs {
+		if sub.User == nil || sub.Plan == nil {
+			continue
+		}
+		due := sub.NextBillingAt
+		if due == nil {
+			due = sub.EndsAt
+		}
+		if due == nil {
+			continue
+		}
+		daysLeft := daysUntilUTC(today, *due)
+		if daysLeft == 7 || daysLeft == 3 || daysLeft == 1 {
+			dayLabel := "days"
+			if daysLeft == 1 {
+				dayLabel = "day"
+			}
+			title := fmt.Sprintf("Your SAKU subscription ends in %d %s", daysLeft, dayLabel)
+			message := fmt.Sprintf("Your %s subscription is active until %s. Renew or prepare payment so your Pro features stay available.", sub.Plan.Name, due.Format("02 Jan 2006"))
+			_ = notificationSvc.Create(ctx, domain.Notification{
+				UserID: sub.UserID, Type: "subscription_expiring_soon", Title: title, Message: message, RefType: "subscription", RefID: sub.ID.String(),
+			})
+			_ = mailClient.Send(
+				sub.User.Email,
+				title,
+				subscriptionReminderEmailHTML(sub.User.Name, sub.Plan.Name, *due, daysLeft, false),
+			)
+			continue
+		}
+		if daysLeft == 0 {
+			title := "Your SAKU subscription has ended"
+			message := fmt.Sprintf("Your %s subscription period ended on %s. Create a new invoice to continue using Pro features.", sub.Plan.Name, due.Format("02 Jan 2006"))
+			_ = notificationSvc.Create(ctx, domain.Notification{
+				UserID: sub.UserID, Type: "subscription_ended", Title: title, Message: message, RefType: "subscription", RefID: sub.ID.String(),
+			})
+			_ = mailClient.Send(
+				sub.User.Email,
+				title,
+				subscriptionReminderEmailHTML(sub.User.Name, sub.Plan.Name, *due, daysLeft, true),
+			)
+			sub.Status = domain.SubscriptionStatusExpired
+			sub.NextBillingAt = nil
+			if err := subRepo.UpdateSubscription(&sub); err != nil {
+				log.Printf("reminder: expire subscription %s: %v", sub.ID, err)
+			}
+		}
+	}
+}
+
+func billReminderEmailHTML(name, billName string, amount float64, currency string, dueDate time.Time) string {
+	displayName := strings.TrimSpace(name)
+	if displayName == "" {
+		displayName = "SAKU user"
+	}
+	detail := fmt.Sprintf(
+		"Bill: %s\nAmount: %s\nDue date: %s",
+		strings.TrimSpace(billName),
+		formatMoney(amount, currency),
+		dueDate.Format("02 Jan 2006"),
+	)
+	return mailer.BlueTemplate(mailer.BlueTemplateData{
+		Title:       "Upcoming Bill Reminder",
+		Preheader:   fmt.Sprintf("%s is due in 7 days.", strings.TrimSpace(billName)),
+		Badge:       "Billing Reminder",
+		Greeting:    fmt.Sprintf("Hi %s,", displayName),
+		Intro:       "One of your upcoming bills is due in 7 days. Prepare the balance early so the payment does not disrupt your cashflow.",
+		DetailLabel: "Billing Detail",
+		DetailValue: detail,
+		Warning:     "Open SAKU to review this bill, check your available wallet balance, and adjust the reminder when needed.",
+		Footer:      "SAKU helps you stay ahead of recurring payments. This is an automated email, please do not reply.",
+	})
+}
+
+func subscriptionReminderEmailHTML(name, planName string, dueDate time.Time, daysLeft int, ended bool) string {
+	displayName := strings.TrimSpace(name)
+	if displayName == "" {
+		displayName = "SAKU user"
+	}
+	title := "Subscription Reminder"
+	preheader := fmt.Sprintf("Your %s subscription ends in %d days.", planName, daysLeft)
+	intro := "Your SAKU subscription period is almost over. Renew or prepare payment to keep your Pro features available without interruption."
+	warning := "Open SAKU to review your subscription and create a new invoice before the active period ends."
+	badge := "Subscription"
+	if ended {
+		title = "Subscription Ended"
+		preheader = fmt.Sprintf("Your %s subscription period has ended.", planName)
+		intro = "Your SAKU subscription period has ended. You can renew at any time to restore access to Pro features."
+		warning = "Open SAKU to choose a plan and create a new invoice when you are ready to continue."
+		badge = "Renewal Needed"
+	}
+	detail := fmt.Sprintf("Plan: %s\nPeriod end: %s\nStatus: %s", planName, dueDate.Format("02 Jan 2006"), map[bool]string{true: "Ended", false: "Active"}[ended])
+	return mailer.BlueTemplate(mailer.BlueTemplateData{
+		Title:       title,
+		Preheader:   preheader,
+		Badge:       badge,
+		Greeting:    fmt.Sprintf("Hi %s,", displayName),
+		Intro:       intro,
+		DetailLabel: "Subscription Detail",
+		DetailValue: detail,
+		Warning:     warning,
+		Footer:      "Thank you for using SAKU. This is an automated email, please do not reply.",
+	})
+}
+
+func formatMoney(amount float64, currency string) string {
+	if strings.EqualFold(currency, "IDR") || currency == "" {
+		return "Rp " + formatThousandsID(amount)
+	}
+	return fmt.Sprintf("%.0f %s", amount, currency)
+}
+
+func formatThousandsID(amount float64) string {
+	raw := fmt.Sprintf("%.0f", amount)
+	var b strings.Builder
+	for i, r := range raw {
+		if i > 0 && (len(raw)-i)%3 == 0 {
+			b.WriteByte('.')
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+func daysUntilUTC(now, target time.Time) int {
+	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	due := target.UTC()
+	end := time.Date(due.Year(), due.Month(), due.Day(), 0, 0, 0, 0, time.UTC)
+	return int(end.Sub(start).Hours() / 24)
 }
 
 func (a *App) Run() error {
@@ -243,6 +502,9 @@ func (a *App) Run() error {
 }
 
 func (a *App) close() {
+	if a.stopJobs != nil {
+		a.stopJobs()
+	}
 	if a.cache != nil {
 		if err := a.cache.Close(); err != nil {
 			log.Printf("cache: close: %v", err)

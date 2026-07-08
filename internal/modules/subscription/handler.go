@@ -1,12 +1,15 @@
 package subscription
 
 import (
+	"errors"
 	"strconv"
 
+	"github.com/ganiramadhan/starter-go/internal/domain"
 	"github.com/ganiramadhan/starter-go/internal/dto"
 	"github.com/ganiramadhan/starter-go/pkg/httpx"
 	"github.com/ganiramadhan/starter-go/pkg/validator"
 	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
 )
 
 type Handler struct {
@@ -57,6 +60,18 @@ func (h *Handler) Checkout(c *fiber.Ctx) error {
 	return httpx.Created(c, "Checkout created", out)
 }
 
+func (h *Handler) ValidateVoucher(c *fiber.Ctx) error {
+	var req dto.ValidateVoucherRequest
+	if err := httpx.Bind(c, h.validator, &req); err != nil {
+		return err
+	}
+	out, err := h.service.ValidateVoucher(c.Context(), req)
+	if err != nil {
+		return err
+	}
+	return httpx.OK(c, "Voucher validated", out)
+}
+
 // MySubscriptions godoc
 // @Summary  List my subscriptions
 // @Tags     Subscriptions
@@ -90,10 +105,59 @@ func (h *Handler) ActiveSubscription(c *fiber.Ctx) error {
 	}
 	out, err := h.service.ActiveSubscription(c.Context(), uid)
 	if err != nil {
-		// 404 → return null payload instead of error so the UI can show "no active sub".
-		return httpx.OK(c, "No active subscription", nil)
+		if errors.Is(err, domain.ErrNotFound) {
+			return httpx.OK(c, "No active subscription", nil)
+		}
+		return err
 	}
 	return httpx.OK(c, "Active subscription", out)
+}
+
+func (h *Handler) ConfirmCheckout(c *fiber.Ctx) error {
+	uid, err := httpx.UserID(c)
+	if err != nil {
+		return err
+	}
+	var req dto.ConfirmSubscriptionRequest
+	if err := httpx.Bind(c, h.validator, &req); err != nil {
+		return err
+	}
+	out, err := h.service.ConfirmCheckout(c.Context(), uid, req)
+	if err != nil {
+		return err
+	}
+	return httpx.OK(c, "Subscription confirmed", out)
+}
+
+func (h *Handler) RenewInvoice(c *fiber.Ctx) error {
+	uid, err := httpx.UserID(c)
+	if err != nil {
+		return err
+	}
+	id, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid subscription id")
+	}
+	out, err := h.service.RenewInvoice(c.Context(), uid, id)
+	if err != nil {
+		return err
+	}
+	return httpx.Created(c, "Invoice created", out)
+}
+
+func (h *Handler) Cancel(c *fiber.Ctx) error {
+	uid, err := httpx.UserID(c)
+	if err != nil {
+		return err
+	}
+	id, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid subscription id")
+	}
+	if err := h.service.Cancel(c.Context(), uid, id); err != nil {
+		return err
+	}
+	return httpx.OK(c, "Subscription cancelled", nil)
 }
 
 // Webhook godoc
@@ -139,4 +203,59 @@ func (h *Handler) ListAllAdmin(c *fiber.Ctx) error {
 		return err
 	}
 	return httpx.OK(c, "Successfully retrieved subscriptions", out)
+}
+
+func (h *Handler) ListVouchersAdmin(c *fiber.Ctx) error {
+	page, _ := strconv.Atoi(c.Query("page", "1"))
+	limit, _ := strconv.Atoi(c.Query("limit", "50"))
+	if page < 1 {
+		page = 1
+	}
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	out, err := h.service.ListVouchersAdmin(c.Context(), limit, (page-1)*limit)
+	if err != nil {
+		return err
+	}
+	return httpx.OK(c, "Successfully retrieved vouchers", out)
+}
+
+func (h *Handler) CreateVoucherAdmin(c *fiber.Ctx) error {
+	var req dto.VoucherRequest
+	if err := httpx.Bind(c, h.validator, &req); err != nil {
+		return err
+	}
+	out, err := h.service.CreateVoucherAdmin(c.Context(), req)
+	if err != nil {
+		return err
+	}
+	return httpx.Created(c, "Voucher created", out)
+}
+
+func (h *Handler) UpdateVoucherAdmin(c *fiber.Ctx) error {
+	id, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid voucher id")
+	}
+	var req dto.VoucherRequest
+	if err := httpx.Bind(c, h.validator, &req); err != nil {
+		return err
+	}
+	out, err := h.service.UpdateVoucherAdmin(c.Context(), id, req)
+	if err != nil {
+		return err
+	}
+	return httpx.OK(c, "Voucher updated", out)
+}
+
+func (h *Handler) DeleteVoucherAdmin(c *fiber.Ctx) error {
+	id, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid voucher id")
+	}
+	if err := h.service.DeleteVoucherAdmin(c.Context(), id); err != nil {
+		return err
+	}
+	return httpx.OK(c, "Voucher deleted", nil)
 }

@@ -14,6 +14,7 @@ type ListFilter struct {
 	WalletID   *uuid.UUID
 	CategoryID *uuid.UUID
 	Type       string
+	Source     string
 	From       *time.Time
 	To         *time.Time
 	Search     string
@@ -39,7 +40,7 @@ func (r *repository) DB() *gorm.DB { return r.db }
 func (r *repository) scoped(userID uuid.UUID) *gorm.DB {
 	return r.db.Model(&domain.Transaction{}).
 		Joins("JOIN wallets ON wallets.id = transactions.wallet_id").
-		Where("wallets.user_id = ?", userID)
+		Where("wallets.user_id = ? AND wallets.deleted_at IS NULL", userID)
 }
 
 func (r *repository) List(f ListFilter) ([]domain.Transaction, int64, error) {
@@ -53,6 +54,9 @@ func (r *repository) List(f ListFilter) ([]domain.Transaction, int64, error) {
 	}
 	if f.Type != "" {
 		q = q.Where("transactions.type = ?", f.Type)
+	}
+	if f.Source != "" {
+		q = q.Where("transactions.source = ?", f.Source)
 	}
 	if f.From != nil {
 		q = q.Where("transactions.transaction_date >= ?", *f.From)
@@ -81,7 +85,10 @@ func (r *repository) List(f ListFilter) ([]domain.Transaction, int64, error) {
 	offset := (page - 1) * limit
 
 	var rows []domain.Transaction
-	err := q.Order("transactions.transaction_date DESC").
+	err := q.
+		Preload("Category").
+		Preload("Wallet").
+		Order("transactions.transaction_date DESC").
 		Limit(limit).Offset(offset).Find(&rows).Error
 	return rows, total, err
 }
@@ -89,6 +96,8 @@ func (r *repository) List(f ListFilter) ([]domain.Transaction, int64, error) {
 func (r *repository) FindByID(userID, id uuid.UUID) (*domain.Transaction, error) {
 	var t domain.Transaction
 	err := r.scoped(userID).
+		Preload("Category").
+		Preload("Wallet").
 		Where("transactions.id = ?", id).
 		First(&t).Error
 	if err != nil {

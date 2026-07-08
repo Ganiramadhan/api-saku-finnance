@@ -14,6 +14,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/google/uuid"
 )
 
@@ -174,4 +175,48 @@ func (s *S3Storage) Delete(ctx context.Context, objectKey string) error {
 		return fmt.Errorf("delete: %w", err)
 	}
 	return nil
+}
+
+func (s *S3Storage) DeletePrefixOlderThan(ctx context.Context, prefix string, olderThan time.Duration) (int, error) {
+	prefix = strings.TrimPrefix(strings.TrimSpace(prefix), "/")
+	if prefix == "" {
+		return 0, fmt.Errorf("delete prefix: prefix is required")
+	}
+	if olderThan <= 0 {
+		olderThan = 24 * time.Hour
+	}
+	cutoff := time.Now().UTC().Add(-olderThan)
+	deleted := 0
+	var token *string
+	for {
+		out, err := s.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+			Bucket:            aws.String(s.bucket),
+			Prefix:            aws.String(prefix),
+			ContinuationToken: token,
+		})
+		if err != nil {
+			return deleted, fmt.Errorf("list objects: %w", err)
+		}
+		keys := make([]types.ObjectIdentifier, 0, len(out.Contents))
+		for _, obj := range out.Contents {
+			if obj.Key == nil || obj.LastModified == nil || obj.LastModified.After(cutoff) {
+				continue
+			}
+			keys = append(keys, types.ObjectIdentifier{Key: obj.Key})
+		}
+		if len(keys) > 0 {
+			if _, err := s.client.DeleteObjects(ctx, &s3.DeleteObjectsInput{
+				Bucket: aws.String(s.bucket),
+				Delete: &types.Delete{Objects: keys, Quiet: aws.Bool(true)},
+			}); err != nil {
+				return deleted, fmt.Errorf("delete objects: %w", err)
+			}
+			deleted += len(keys)
+		}
+		if out.IsTruncated == nil || !*out.IsTruncated {
+			break
+		}
+		token = out.NextContinuationToken
+	}
+	return deleted, nil
 }

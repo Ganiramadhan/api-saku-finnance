@@ -7,116 +7,336 @@ import (
 	"gorm.io/gorm"
 )
 
+type foreignKeySpec struct {
+	Name      string
+	Table     string
+	Column    string
+	RefTable  string
+	RefColumn string
+	OnUpdate  string
+	OnDelete  string
+}
+
 func Migrate(db *gorm.DB) error {
 	if db == nil {
 		return fmt.Errorf("db is nil")
 	}
 
-	if err := ensureEnums(db); err != nil {
-		return fmt.Errorf("ensure enums: %w", err)
+	if err := normalizeTelegramChatIDs(db); err != nil {
+		return fmt.Errorf("normalize telegram chat ids: %w", err)
 	}
 
-	if err := relaxAILogSchema(db); err != nil {
-		return fmt.Errorf("relax ai_log schema: %w", err)
+	if err := autoMigrate(db); err != nil {
+		return fmt.Errorf("auto migrate: %w", err)
 	}
 
-	if err := dropLegacyAttachments(db); err != nil {
-		return fmt.Errorf("drop legacy attachments: %w", err)
+	if err := normalizeCashflowStartDays(db); err != nil {
+		return fmt.Errorf("normalize cashflow start days: %w", err)
+	}
+
+	if err := normalizeSubscriptionPayments(db); err != nil {
+		return fmt.Errorf("normalize subscription payments: %w", err)
+	}
+	if err := normalizeDuplicatePendingSubscriptions(db); err != nil {
+		return fmt.Errorf("normalize duplicate pending subscriptions: %w", err)
+	}
+
+	if err := normalizeTelegramChatIDs(db); err != nil {
+		return fmt.Errorf("normalize telegram chat ids: %w", err)
+	}
+
+	if err := ensureIndexes(db); err != nil {
+		return fmt.Errorf("ensure indexes: %w", err)
+	}
+
+	if err := ensureForeignKeys(db); err != nil {
+		return fmt.Errorf("ensure foreign keys: %w", err)
+	}
+
+	return nil
+}
+
+func normalizeCashflowStartDays(db *gorm.DB) error {
+	return db.Exec(`DO $$
+	BEGIN
+		IF EXISTS (
+			SELECT 1 FROM information_schema.columns
+			WHERE table_schema = current_schema()
+				AND table_name = 'users'
+				AND column_name = 'cashflow_start_day'
+		) THEN
+			UPDATE users
+			SET cashflow_start_day = 1
+			WHERE cashflow_start_day IS NULL
+				OR cashflow_start_day < 1
+				OR cashflow_start_day > 31;
+		END IF;
+	END $$;`).Error
+}
+
+func normalizeTelegramChatIDs(db *gorm.DB) error {
+	return db.Exec(`DO $$
+	BEGIN
+		IF EXISTS (
+			SELECT 1 FROM information_schema.columns
+			WHERE table_schema = current_schema()
+				AND table_name = 'users'
+				AND column_name = 'telegram_chat_id'
+		) THEN
+			UPDATE users SET telegram_chat_id = NULL WHERE telegram_chat_id = '';
+		END IF;
+	END $$;`).Error
+}
+
+func normalizeSubscriptionPayments(db *gorm.DB) error {
+	return db.Exec(`DO $$
+	BEGIN
+		IF EXISTS (
+			SELECT 1 FROM information_schema.columns
+			WHERE table_schema = current_schema()
+				AND table_name = 'subscriptions'
+				AND column_name = 'payment_status'
+		) THEN
+			UPDATE subscriptions
+			SET payment_status = CASE
+				WHEN status = 'active' THEN 'paid'
+				WHEN status = 'expired' THEN 'expired'
+				WHEN status = 'cancelled' THEN 'cancelled'
+				WHEN status = 'failed' THEN 'failed'
+				ELSE 'pending'
+			END
+			WHERE payment_status IS NULL OR payment_status = '';
+
+			UPDATE subscriptions
+			SET original_amount = amount
+			WHERE original_amount IS NULL OR original_amount = 0;
+
+			UPDATE subscriptions
+			SET payment_created_at = created_at
+			WHERE payment_created_at IS NULL;
+		END IF;
+	END $$;`).Error
+}
+
+func normalizeDuplicatePendingSubscriptions(db *gorm.DB) error {
+	return db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec(`
+			WITH ranked AS (
+				SELECT id, ROW_NUMBER() OVER (
+					PARTITION BY user_id
+					ORDER BY created_at DESC, id DESC
+				) AS row_number
+				FROM subscriptions
+				WHERE status = 'pending'
+			)
+			UPDATE subscriptions
+			SET status = 'cancelled',
+				payment_status = 'cancelled',
+				next_billing_at = NULL,
+				updated_at = NOW()
+			WHERE id IN (SELECT id FROM ranked WHERE row_number > 1);
+		`).Error; err != nil {
+			return err
+		}
+		return tx.Exec(`
+			UPDATE subscription_payments AS payment
+			SET status = 'cancelled',
+				updated_at = NOW()
+			FROM subscriptions AS subscription
+			WHERE payment.subscription_id = subscription.id
+				AND subscription.status = 'cancelled'
+				AND subscription.payment_status = 'cancelled'
+				AND payment.status = 'pending';
+		`).Error
+	})
+}
+
+func autoMigrate(db *gorm.DB) error {
+	prevFKAutoMigrate := db.Config.DisableForeignKeyConstraintWhenMigrating
+	db.Config.DisableForeignKeyConstraintWhenMigrating = true
+	defer func() {
+		db.Config.DisableForeignKeyConstraintWhenMigrating = prevFKAutoMigrate
+	}()
+
+	if err := db.Exec("CREATE SEQUENCE IF NOT EXISTS support_ticket_code_seq START WITH 1").Error; err != nil {
+		return err
 	}
 
 	if err := db.AutoMigrate(
 		&domain.User{},
+		&domain.UserPasswordHistory{},
+		&domain.UserOTP{},
+		&domain.UserReferral{},
 		&domain.Wallet{},
+		&domain.WalletTarget{},
+		&domain.WalletTransfer{},
 		&domain.Category{},
 		&domain.Transaction{},
 		&domain.AIProcessingLog{},
+		&domain.SupportTicket{},
+		&domain.SupportMessage{},
 		&domain.Budget{},
 		&domain.SavingsGoal{},
 		&domain.SavingsGoalContribution{},
+		&domain.UpcomingBilling{},
 		&domain.Plan{},
 		&domain.Subscription{},
+		&domain.SubscriptionPayment{},
+		&domain.SubscriptionPaymentEvent{},
+		&domain.Voucher{},
+		&domain.Notification{},
 		&domain.SplitBill{},
 		&domain.SplitBillParticipant{},
 	); err != nil {
-		return fmt.Errorf("auto migrate: %w", err)
+		return err
 	}
 
-	for _, idx := range indexStatements {
-		if err := db.Exec(idx).Error; err != nil {
-			return fmt.Errorf("create index: %w", err)
+	return backfillSupportTicketCodes(db)
+}
+
+func backfillSupportTicketCodes(db *gorm.DB) error {
+	if err := db.Exec(`
+		UPDATE support_tickets
+		SET ticket_code = 'TICKET-' || LPAD(nextval('support_ticket_code_seq')::text, 4, '0')
+		WHERE COALESCE(ticket_code, '') = '';
+	`).Error; err != nil {
+		return err
+	}
+	return db.Exec(`
+		SELECT setval(
+			'support_ticket_code_seq',
+			GREATEST(
+				COALESCE((SELECT MAX(NULLIF(regexp_replace(ticket_code, '\D', '', 'g'), '')::bigint) FROM support_tickets), 0),
+				1
+			),
+			true
+		);
+	`).Error
+}
+
+func ensureIndexes(db *gorm.DB) error {
+	return execAll(db, indexStatements)
+}
+
+func ensureForeignKeys(db *gorm.DB) error {
+	for _, fk := range foreignKeys {
+		if err := db.Exec(foreignKeySQL(fk)).Error; err != nil {
+			return fmt.Errorf("%s: %w", fk.Name, err)
 		}
 	}
 	return nil
 }
 
-func dropLegacyAttachments(db *gorm.DB) error {
-	stmts := []string{
-		`ALTER TABLE IF EXISTS ai_processing_logs DROP CONSTRAINT IF EXISTS fk_ai_processing_logs_attachment`,
-		`ALTER TABLE IF EXISTS ai_processing_logs DROP COLUMN IF EXISTS attachment_id`,
-		`DROP TABLE IF EXISTS attachments CASCADE`,
-	}
-	for _, s := range stmts {
-		_ = db.Exec(s).Error
-	}
-	return nil
-}
-
-func relaxAILogSchema(db *gorm.DB) error {
-	if !db.Migrator().HasTable("ai_processing_logs") {
-		return nil
-	}
-
-	stmts := []string{
-		`ALTER TABLE IF EXISTS ai_processing_logs ADD COLUMN IF NOT EXISTS user_id uuid`,
-		`ALTER TABLE IF EXISTS ai_processing_logs ADD COLUMN IF NOT EXISTS feature varchar(32) DEFAULT 'categorize'`,
-		`ALTER TABLE IF EXISTS ai_processing_logs ADD COLUMN IF NOT EXISTS latency_ms int DEFAULT 0`,
-		`ALTER TABLE IF EXISTS ai_processing_logs ADD COLUMN IF NOT EXISTS error_message text`,
-	}
-	for _, s := range stmts {
-		_ = db.Exec(s).Error
-	}
-	return nil
-}
-
-func ensureEnums(db *gorm.DB) error {
-	stmts := []string{
-		`DO $$ BEGIN
-			CREATE TYPE transaction_type_enum AS ENUM ('income','expense');
-		EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
-
-		`DO $$ BEGIN
-			CREATE TYPE transaction_source_enum AS ENUM ('manual','ai_ocr','import','api');
-		EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
-
-		`DO $$ BEGIN
-			CREATE TYPE ai_status_enum AS ENUM ('pending','success','failed');
-		EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
-
-		`DO $$ BEGIN
-			CREATE TYPE wallet_type_enum AS ENUM ('personal','business','shared');
-		EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
-
-		`DO $$ BEGIN
-			CREATE TYPE budget_period_enum AS ENUM ('daily','weekly','monthly');
-		EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
-	}
-	for _, s := range stmts {
-		if err := db.Exec(s).Error; err != nil {
+func execAll(db *gorm.DB, stmts []string) error {
+	for _, stmt := range stmts {
+		if err := db.Exec(stmt).Error; err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
+func foreignKeySQL(fk foreignKeySpec) string {
+	return fmt.Sprintf(`DO $$
+	DECLARE
+		existing RECORD;
+	BEGIN
+		IF to_regclass(format('%%I.%%I', current_schema(), '%[2]s')) IS NULL
+			OR to_regclass(format('%%I.%%I', current_schema(), '%[4]s')) IS NULL THEN
+			RETURN;
+		END IF;
+
+		IF EXISTS (
+			SELECT 1
+			FROM pg_constraint con
+			JOIN pg_class tbl ON tbl.oid = con.conrelid
+			JOIN pg_namespace ns ON ns.oid = tbl.relnamespace
+			WHERE con.contype = 'f'
+				AND con.conname = '%[1]s'
+				AND ns.nspname = current_schema()
+				AND tbl.relname = '%[2]s'
+		) THEN
+			RETURN;
+		END IF;
+
+		FOR existing IN
+			SELECT con.conname
+			FROM pg_constraint con
+			JOIN pg_class tbl ON tbl.oid = con.conrelid
+			JOIN pg_namespace ns ON ns.oid = tbl.relnamespace
+			JOIN pg_attribute att ON att.attrelid = tbl.oid AND att.attnum = ANY(con.conkey)
+			WHERE con.contype = 'f'
+				AND ns.nspname = current_schema()
+				AND tbl.relname = '%[2]s'
+				AND att.attname = '%[3]s'
+		LOOP
+			EXECUTE format('ALTER TABLE %%I DROP CONSTRAINT %%I', '%[2]s', existing.conname);
+		END LOOP;
+
+		EXECUTE format(
+			'ALTER TABLE %%I ADD CONSTRAINT %%I FOREIGN KEY (%%I) REFERENCES %%I(%%I) ON UPDATE %[6]s ON DELETE %[7]s',
+			'%[2]s',
+			'%[1]s',
+			'%[3]s',
+			'%[4]s',
+			'%[5]s'
+		);
+	END $$;`, fk.Name, fk.Table, fk.Column, fk.RefTable, fk.RefColumn, fk.OnUpdate, fk.OnDelete)
+}
+
+var foreignKeys = []foreignKeySpec{
+	{Name: "fk_user_otps_user_cascade", Table: "user_otps", Column: "user_id", RefTable: "users", RefColumn: "id", OnUpdate: "CASCADE", OnDelete: "CASCADE"},
+	{Name: "fk_user_password_histories_user_cascade", Table: "user_password_histories", Column: "user_id", RefTable: "users", RefColumn: "id", OnUpdate: "CASCADE", OnDelete: "CASCADE"},
+	{Name: "fk_user_referrals_user_cascade", Table: "user_referrals", Column: "user_id", RefTable: "users", RefColumn: "id", OnUpdate: "CASCADE", OnDelete: "CASCADE"},
+
+	{Name: "fk_wallets_user_cascade", Table: "wallets", Column: "user_id", RefTable: "users", RefColumn: "id", OnUpdate: "CASCADE", OnDelete: "CASCADE"},
+	{Name: "fk_wallet_targets_wallet_cascade", Table: "wallet_targets", Column: "wallet_id", RefTable: "wallets", RefColumn: "id", OnUpdate: "CASCADE", OnDelete: "CASCADE"},
+
+	{Name: "fk_categories_user_cascade", Table: "categories", Column: "user_id", RefTable: "users", RefColumn: "id", OnUpdate: "CASCADE", OnDelete: "CASCADE"},
+	{Name: "fk_transactions_wallet_cascade", Table: "transactions", Column: "wallet_id", RefTable: "wallets", RefColumn: "id", OnUpdate: "CASCADE", OnDelete: "CASCADE"},
+	{Name: "fk_transactions_category_cascade", Table: "transactions", Column: "category_id", RefTable: "categories", RefColumn: "id", OnUpdate: "CASCADE", OnDelete: "CASCADE"},
+
+	{Name: "fk_budgets_user_cascade", Table: "budgets", Column: "user_id", RefTable: "users", RefColumn: "id", OnUpdate: "CASCADE", OnDelete: "CASCADE"},
+	{Name: "fk_budgets_wallet_cascade", Table: "budgets", Column: "wallet_id", RefTable: "wallets", RefColumn: "id", OnUpdate: "CASCADE", OnDelete: "CASCADE"},
+	{Name: "fk_budgets_category_cascade", Table: "budgets", Column: "category_id", RefTable: "categories", RefColumn: "id", OnUpdate: "CASCADE", OnDelete: "CASCADE"},
+
+	{Name: "fk_savings_goals_user_cascade", Table: "savings_goals", Column: "user_id", RefTable: "users", RefColumn: "id", OnUpdate: "CASCADE", OnDelete: "CASCADE"},
+	{Name: "fk_savings_goals_wallet_cascade", Table: "savings_goals", Column: "wallet_id", RefTable: "wallets", RefColumn: "id", OnUpdate: "CASCADE", OnDelete: "CASCADE"},
+	{Name: "fk_savings_goal_contributions_goal_cascade", Table: "savings_goal_contributions", Column: "goal_id", RefTable: "savings_goals", RefColumn: "id", OnUpdate: "CASCADE", OnDelete: "CASCADE"},
+
+	{Name: "fk_upcoming_billings_user_cascade", Table: "upcoming_billings", Column: "user_id", RefTable: "users", RefColumn: "id", OnUpdate: "CASCADE", OnDelete: "CASCADE"},
+	{Name: "fk_notifications_user_cascade", Table: "notifications", Column: "user_id", RefTable: "users", RefColumn: "id", OnUpdate: "CASCADE", OnDelete: "CASCADE"},
+	{Name: "fk_ai_processing_logs_user_cascade", Table: "ai_processing_logs", Column: "user_id", RefTable: "users", RefColumn: "id", OnUpdate: "CASCADE", OnDelete: "CASCADE"},
+
+	{Name: "fk_subscriptions_user_cascade", Table: "subscriptions", Column: "user_id", RefTable: "users", RefColumn: "id", OnUpdate: "CASCADE", OnDelete: "CASCADE"},
+	{Name: "fk_subscriptions_plan_cascade", Table: "subscriptions", Column: "plan_id", RefTable: "plans", RefColumn: "id", OnUpdate: "CASCADE", OnDelete: "CASCADE"},
+	{Name: "fk_subscriptions_referrer_set_null", Table: "subscriptions", Column: "referrer_id", RefTable: "users", RefColumn: "id", OnUpdate: "CASCADE", OnDelete: "SET NULL"},
+
+	{Name: "fk_split_bills_owner_user_cascade", Table: "split_bills", Column: "owner_user_id", RefTable: "users", RefColumn: "id", OnUpdate: "CASCADE", OnDelete: "CASCADE"},
+	{Name: "fk_split_bill_participants_split_bill_cascade", Table: "split_bill_participants", Column: "split_bill_id", RefTable: "split_bills", RefColumn: "id", OnUpdate: "CASCADE", OnDelete: "CASCADE"},
+}
+
 var indexStatements = []string{
 	`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email
 		ON users (email) WHERE deleted_at IS NULL`,
 	`CREATE INDEX IF NOT EXISTS idx_users_status ON users (status)`,
+	`CREATE INDEX IF NOT EXISTS idx_users_auth_provider ON users (auth_provider)`,
+	`CREATE INDEX IF NOT EXISTS idx_users_last_login_at ON users (last_login_at DESC)`,
+
+	`CREATE UNIQUE INDEX IF NOT EXISTS idx_user_referrals_code ON user_referrals (code)`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS idx_user_referrals_user ON user_referrals (user_id)`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS idx_user_otps_user_purpose ON user_otps (user_id, purpose)`,
+	`CREATE INDEX IF NOT EXISTS idx_user_otps_expires_at ON user_otps (expires_at)`,
+	`CREATE INDEX IF NOT EXISTS idx_user_password_histories_user_created
+		ON user_password_histories (user_id, created_at DESC)`,
 
 	`CREATE UNIQUE INDEX IF NOT EXISTS idx_wallets_user_default
 		ON wallets (user_id) WHERE is_default = true AND deleted_at IS NULL`,
 	`CREATE INDEX IF NOT EXISTS idx_wallets_user_type
 		ON wallets (user_id, type) WHERE deleted_at IS NULL`,
+	`CREATE INDEX IF NOT EXISTS idx_wallets_user_id
+		ON wallets (user_id, id) WHERE deleted_at IS NULL`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS idx_wallet_targets_wallet ON wallet_targets (wallet_id)`,
 
 	`CREATE INDEX IF NOT EXISTS idx_categories_user_type
 		ON categories (user_id, type) WHERE deleted_at IS NULL`,
@@ -129,11 +349,49 @@ var indexStatements = []string{
 		ON transactions (category_id, transaction_date DESC) WHERE deleted_at IS NULL`,
 	`CREATE INDEX IF NOT EXISTS idx_transactions_date
 		ON transactions (transaction_date DESC) WHERE deleted_at IS NULL`,
+	`CREATE INDEX IF NOT EXISTS idx_transactions_date_wallet
+		ON transactions (transaction_date DESC, wallet_id) WHERE deleted_at IS NULL`,
 	`CREATE INDEX IF NOT EXISTS idx_transactions_type
 		ON transactions (type) WHERE deleted_at IS NULL`,
+	`CREATE INDEX IF NOT EXISTS idx_transactions_source
+		ON transactions (source) WHERE deleted_at IS NULL`,
 
 	`CREATE INDEX IF NOT EXISTS idx_budgets_user_period
 		ON budgets (user_id, period) WHERE deleted_at IS NULL`,
 	`CREATE INDEX IF NOT EXISTS idx_budgets_wallet_category
 		ON budgets (wallet_id, category_id) WHERE deleted_at IS NULL`,
+
+	`CREATE INDEX IF NOT EXISTS idx_savings_goals_user
+		ON savings_goals (user_id) WHERE deleted_at IS NULL`,
+	`CREATE INDEX IF NOT EXISTS idx_savings_goals_wallet
+		ON savings_goals (wallet_id) WHERE wallet_id IS NOT NULL AND deleted_at IS NULL`,
+	`CREATE INDEX IF NOT EXISTS idx_savings_goal_contributions_goal
+		ON savings_goal_contributions (goal_id)`,
+
+	`CREATE INDEX IF NOT EXISTS idx_upcoming_billings_user_due
+		ON upcoming_billings (user_id, due_date) WHERE deleted_at IS NULL`,
+	`CREATE INDEX IF NOT EXISTS idx_notifications_user_created
+		ON notifications (user_id, created_at DESC)`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_user_ref_type
+		ON notifications (user_id, ref_type, ref_id, type)
+		WHERE ref_type <> '' AND ref_id <> ''`,
+
+	`CREATE INDEX IF NOT EXISTS idx_ai_processing_logs_user_feature_created
+		ON ai_processing_logs (user_id, feature, created_at DESC)`,
+	`CREATE INDEX IF NOT EXISTS idx_ai_processing_logs_status
+		ON ai_processing_logs (status)`,
+
+	`CREATE INDEX IF NOT EXISTS idx_subscriptions_user ON subscriptions (user_id)`,
+	`CREATE INDEX IF NOT EXISTS idx_subscriptions_plan ON subscriptions (plan_id)`,
+	`CREATE INDEX IF NOT EXISTS idx_subscriptions_status ON subscriptions (status)`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS idx_subscriptions_one_pending_per_user
+		ON subscriptions (user_id) WHERE status = 'pending'`,
+	`CREATE INDEX IF NOT EXISTS idx_subscriptions_trial_ends ON subscriptions (trial_ends_at) WHERE trial_ends_at IS NOT NULL`,
+	`CREATE INDEX IF NOT EXISTS idx_subscriptions_referrer
+		ON subscriptions (referrer_id) WHERE referrer_id IS NOT NULL`,
+
+	`CREATE INDEX IF NOT EXISTS idx_split_bills_owner
+		ON split_bills (owner_user_id) WHERE deleted_at IS NULL`,
+	`CREATE INDEX IF NOT EXISTS idx_split_bill_participants_bill
+		ON split_bill_participants (split_bill_id)`,
 }

@@ -16,8 +16,14 @@ const scanImagePresignTTL = 6 * time.Hour
 
 type Service interface {
 	List(ctx context.Context, userID uuid.UUID, feature string, page, limit int) ([]dto.AIProcessingLogResponse, *dto.PaginationMeta, error)
+	ListSavedScanReceipts(ctx context.Context, userID uuid.UUID, page, limit int) ([]dto.AIProcessingLogResponse, *dto.PaginationMeta, error)
 	ListAll(ctx context.Context, page, limit int) ([]dto.AIProcessingLogResponse, *dto.PaginationMeta, error)
-	Record(ctx context.Context, userID uuid.UUID, entry RecordInput) error
+	CountByUserSince(ctx context.Context, userID uuid.UUID, features []string, since time.Time) (int64, error)
+	Delete(ctx context.Context, userID, id uuid.UUID) error
+	DeleteMany(ctx context.Context, userID uuid.UUID, ids []uuid.UUID) error
+	Record(ctx context.Context, userID uuid.UUID, entry RecordInput) (uuid.UUID, error)
+	PromoteImage(ctx context.Context, userID uuid.UUID, oldKey, newKey string) error
+	MarkScanSaved(ctx context.Context, userID, logID uuid.UUID, imageKey string) error
 }
 
 type RecordInput struct {
@@ -97,6 +103,24 @@ func (s *service) List(ctx context.Context, userID uuid.UUID, feature string, pa
 	return out, dto.NewMeta(page, limit, total), nil
 }
 
+func (s *service) ListSavedScanReceipts(ctx context.Context, userID uuid.UUID, page, limit int) ([]dto.AIProcessingLogResponse, *dto.PaginationMeta, error) {
+	if page <= 0 {
+		page = 1
+	}
+	if limit <= 0 || limit > 200 {
+		limit = 20
+	}
+	rows, total, err := s.repo.ListSavedScanReceipts(userID, page, limit)
+	if err != nil {
+		return nil, nil, err
+	}
+	out := make([]dto.AIProcessingLogResponse, 0, len(rows))
+	for _, l := range rows {
+		out = append(out, s.toResp(ctx, l))
+	}
+	return out, dto.NewMeta(page, limit, total), nil
+}
+
 func (s *service) ListAll(ctx context.Context, page, limit int) ([]dto.AIProcessingLogResponse, *dto.PaginationMeta, error) {
 	if page <= 0 {
 		page = 1
@@ -115,7 +139,59 @@ func (s *service) ListAll(ctx context.Context, page, limit int) ([]dto.AIProcess
 	return out, dto.NewMeta(page, limit, total), nil
 }
 
-func (s *service) Record(_ context.Context, userID uuid.UUID, in RecordInput) error {
+func (s *service) CountByUserSince(_ context.Context, userID uuid.UUID, features []string, since time.Time) (int64, error) {
+	return s.repo.CountByUserSince(userID, features, since)
+}
+
+func (s *service) Delete(ctx context.Context, userID, id uuid.UUID) error {
+	logEntry, err := s.repo.FindByID(userID, id)
+	if err != nil {
+		return err
+	}
+	if s.storage != nil && logEntry.RawResponse != "" {
+		var raw map[string]any
+		if err := json.Unmarshal([]byte(logEntry.RawResponse), &raw); err == nil {
+			if key, ok := raw["image_key"].(string); ok && key != "" {
+				if derr := s.storage.Delete(ctx, key); derr != nil {
+					slog.Warn("ailog: failed to delete stored scan image", "log_id", id, "error", derr)
+				}
+			}
+		}
+	}
+	return s.repo.Delete(userID, id)
+}
+
+func (s *service) DeleteMany(ctx context.Context, userID uuid.UUID, ids []uuid.UUID) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	for _, id := range ids {
+		logEntry, err := s.repo.FindByID(userID, id)
+		if err != nil {
+			if err == domain.ErrNotFound {
+				continue
+			}
+			return err
+		}
+		if s.storage != nil && logEntry.RawResponse != "" {
+			var raw map[string]any
+			if err := json.Unmarshal([]byte(logEntry.RawResponse), &raw); err == nil {
+				if key, ok := raw["image_key"].(string); ok && key != "" {
+					if derr := s.storage.Delete(ctx, key); derr != nil {
+						slog.Warn("ailog: failed to delete stored scan image", "log_id", id, "error", derr)
+					}
+				}
+			}
+		}
+	}
+	return s.repo.DeleteMany(userID, ids)
+}
+
+func (s *service) Record(_ context.Context, userID uuid.UUID, in RecordInput) (uuid.UUID, error) {
+	rawResponse := in.RawResponse
+	if rawResponse == "" {
+		rawResponse = "{}"
+	}
 	l := domain.AIProcessingLog{
 		UserID:            userID,
 		Feature:           in.Feature,
@@ -127,7 +203,18 @@ func (s *service) Record(_ context.Context, userID uuid.UUID, in RecordInput) er
 		ExtractedMerchant: in.ExtractedMerchant,
 		ExtractedCategory: in.ExtractedCategory,
 		ErrorMessage:      in.ErrorMessage,
-		RawResponse:       in.RawResponse,
+		RawResponse:       rawResponse,
 	}
-	return s.repo.Create(&l)
+	if err := s.repo.Create(&l); err != nil {
+		return uuid.Nil, err
+	}
+	return l.ID, nil
+}
+
+func (s *service) PromoteImage(_ context.Context, userID uuid.UUID, oldKey, newKey string) error {
+	return s.repo.UpdateImageKey(userID, oldKey, newKey)
+}
+
+func (s *service) MarkScanSaved(_ context.Context, userID, logID uuid.UUID, imageKey string) error {
+	return s.repo.MarkScanSaved(userID, logID, imageKey)
 }

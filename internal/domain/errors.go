@@ -3,9 +3,17 @@ package domain
 import "errors"
 
 var (
-	ErrNotFound           = errors.New("resource not found")
-	ErrAlreadyExists      = errors.New("resource already exists")
-	ErrInvalidCredentials = errors.New("invalid credentials")
-	ErrUnauthorized       = errors.New("unauthorized")
-	ErrInvalidInput       = errors.New("invalid input")
+	ErrNotFound                = errors.New("resource not found")
+	ErrAlreadyExists           = errors.New("Email already registered")
+	ErrInvalidCredentials      = errors.New("invalid credentials")
+	ErrAccountNotVerified      = errors.New("account is not verified")
+	ErrUnauthorized            = errors.New("unauthorized")
+	ErrForbidden               = errors.New("forbidden")
+	ErrInvalidInput            = errors.New("invalid input")
+	ErrInvalidVoucher          = errors.New("voucher code is not valid")
+	ErrGmailRequired           = errors.New("registration requires a Gmail address")
+	ErrInvalidReferral         = errors.New("referral code not found")
+	ErrEmailNotRegistered      = errors.New("email is not registered")
+	ErrInvalidOTP              = errors.New("invalid or expired OTP code")
+	ErrProSubscriptionRequired = errors.New("pro subscription required")
 )

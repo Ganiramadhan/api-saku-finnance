@@ -10,6 +10,9 @@ type Repository interface {
 	List(userID uuid.UUID) ([]domain.Wallet, error)
 	FindByID(userID, id uuid.UUID) (*domain.Wallet, error)
 	Create(w *domain.Wallet) error
+	CreateTransfer(t *domain.WalletTransfer) error
+	ListTransfers(userID uuid.UUID, limit int) ([]domain.WalletTransfer, error)
+	DeleteTransfers(userID uuid.UUID, ids []uuid.UUID) error
 	Update(w *domain.Wallet) error
 	Delete(userID, id uuid.UUID) error
 	ClearDefault(tx *gorm.DB, userID, exceptID uuid.UUID) error
@@ -27,7 +30,8 @@ func (r *repository) WithTx(tx *gorm.DB) Repository { return &repository{db: tx}
 
 func (r *repository) List(userID uuid.UUID) ([]domain.Wallet, error) {
 	var out []domain.Wallet
-	err := r.db.Where("user_id = ?", userID).
+	err := r.db.Preload("Target").
+		Where("user_id = ?", userID).
 		Order("is_default DESC, created_at DESC").
 		Find(&out).Error
 	return out, err
@@ -35,7 +39,7 @@ func (r *repository) List(userID uuid.UUID) ([]domain.Wallet, error) {
 
 func (r *repository) FindByID(userID, id uuid.UUID) (*domain.Wallet, error) {
 	var w domain.Wallet
-	if err := r.db.Where("id = ? AND user_id = ?", id, userID).First(&w).Error; err != nil {
+	if err := r.db.Preload("Target").Where("id = ? AND user_id = ?", id, userID).First(&w).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return nil, domain.ErrNotFound
 		}
@@ -45,6 +49,30 @@ func (r *repository) FindByID(userID, id uuid.UUID) (*domain.Wallet, error) {
 }
 
 func (r *repository) Create(w *domain.Wallet) error { return r.db.Create(w).Error }
+
+func (r *repository) CreateTransfer(t *domain.WalletTransfer) error { return r.db.Create(t).Error }
+
+func (r *repository) ListTransfers(userID uuid.UUID, limit int) ([]domain.WalletTransfer, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	var out []domain.WalletTransfer
+	err := r.db.
+		Preload("FromWallet").
+		Preload("ToWallet").
+		Where("user_id = ?", userID).
+		Order("created_at DESC").
+		Limit(limit).
+		Find(&out).Error
+	return out, err
+}
+
+func (r *repository) DeleteTransfers(userID uuid.UUID, ids []uuid.UUID) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	return r.db.Where("user_id = ? AND id IN ?", userID, ids).Delete(&domain.WalletTransfer{}).Error
+}
 
 func (r *repository) Update(w *domain.Wallet) error { return r.db.Save(w).Error }
 

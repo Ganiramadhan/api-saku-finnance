@@ -2,6 +2,8 @@ package transaction
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ganiramadhan/starter-go/internal/domain"
@@ -76,6 +78,7 @@ func (s *service) List(_ context.Context, userID uuid.UUID, q dto.TransactionLis
 		WalletID:   parseUUID(q.WalletID),
 		CategoryID: parseUUID(q.CategoryID),
 		Type:       q.Type,
+		Source:     q.Source,
 		From:       parseTime(q.From),
 		To:         parseTime(q.To),
 		Search:     q.Search,
@@ -128,13 +131,17 @@ func (s *service) Create(_ context.Context, userID uuid.UUID, req dto.CreateTran
 	if source == "" {
 		source = domain.TxnSourceManual
 	}
+	description := strings.TrimSpace(req.Description)
+	if source == domain.TxnSourceManual && description == "" {
+		return nil, fmt.Errorf("%w: deskripsi wajib diisi untuk transaksi manual", domain.ErrInvalidInput)
+	}
 	t := domain.Transaction{
 		ID:              uuid.New(),
 		WalletID:        req.WalletID,
 		CategoryID:      req.CategoryID,
 		Amount:          req.Amount,
 		Type:            req.Type,
-		Description:     req.Description,
+		Description:     description,
 		MerchantName:    req.MerchantName,
 		TransactionDate: req.TransactionDate,
 		Source:          source,
@@ -162,17 +169,29 @@ func (s *service) Update(_ context.Context, userID, id uuid.UUID, req dto.Update
 	prevWalletID := t.WalletID
 	prevDelta := signedAmount(t.Type, t.Amount)
 
-	if req.WalletID != nil && *req.WalletID != t.WalletID {
-		if _, err := s.wallets.FindByID(userID, *req.WalletID); err != nil {
+	if strings.TrimSpace(req.WalletID) != "" {
+		walletID, err := uuid.Parse(strings.TrimSpace(req.WalletID))
+		if err != nil {
 			return nil, err
 		}
-		t.WalletID = *req.WalletID
+		if walletID != t.WalletID {
+			if _, err := s.wallets.FindByID(userID, walletID); err != nil {
+				return nil, err
+			}
+			t.WalletID = walletID
+		}
 	}
-	if req.CategoryID != nil && *req.CategoryID != t.CategoryID {
-		if _, err := s.cats.FindAccessible(userID, *req.CategoryID); err != nil {
+	if strings.TrimSpace(req.CategoryID) != "" {
+		categoryID, err := uuid.Parse(strings.TrimSpace(req.CategoryID))
+		if err != nil {
 			return nil, err
 		}
-		t.CategoryID = *req.CategoryID
+		if categoryID != t.CategoryID {
+			if _, err := s.cats.FindAccessible(userID, categoryID); err != nil {
+				return nil, err
+			}
+			t.CategoryID = categoryID
+		}
 	}
 	if req.Amount != nil {
 		t.Amount = *req.Amount
@@ -193,7 +212,21 @@ func (s *service) Update(_ context.Context, userID, id uuid.UUID, req dto.Update
 	newDelta := signedAmount(t.Type, t.Amount)
 
 	err = s.repo.DB().Transaction(func(tx *gorm.DB) error {
-		if err := tx.Save(t).Error; err != nil {
+		updatedAt := time.Now().UTC()
+		t.UpdatedAt = updatedAt
+		updates := map[string]any{
+			"wallet_id":        t.WalletID,
+			"category_id":      t.CategoryID,
+			"amount":           t.Amount,
+			"type":             t.Type,
+			"description":      t.Description,
+			"merchant_name":    t.MerchantName,
+			"transaction_date": t.TransactionDate,
+			"updated_at":       updatedAt,
+		}
+		if err := tx.Model(&domain.Transaction{}).
+			Where("id = ?", t.ID).
+			Updates(updates).Error; err != nil {
 			return err
 		}
 		if prevWalletID == t.WalletID {
@@ -238,5 +271,8 @@ func adjustWalletBalance(tx *gorm.DB, walletID uuid.UUID, delta float64) error {
 	}
 	return tx.Model(&domain.Wallet{}).
 		Where("id = ?", walletID).
-		UpdateColumn("balance_cached", gorm.Expr("balance_cached + ?", delta)).Error
+		Updates(map[string]any{
+			"balance_cached": gorm.Expr("balance_cached + ?", delta),
+			"updated_at":     time.Now().UTC(),
+		}).Error
 }

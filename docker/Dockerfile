@@ -1,8 +1,3 @@
-# syntax=docker/dockerfile:1.7
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Build stage
-# ──────────────────────────────────────────────────────────────────────────────
 FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS builder
 
 RUN apk add --no-cache git ca-certificates
@@ -13,13 +8,16 @@ ENV CGO_ENABLED=0 \
 WORKDIR /src
 
 COPY go.mod go.sum ./
+
 RUN --mount=type=cache,target=/go/pkg/mod \
     go mod download
 
 COPY . .
+
 ARG TARGETOS=linux
 ARG TARGETARCH=amd64
 ARG VERSION=dev
+
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
@@ -27,18 +25,24 @@ RUN --mount=type=cache,target=/go/pkg/mod \
       -ldflags="-s -w -X main.version=${VERSION}" \
       -o /out/api ./cmd/api
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Runtime stage — distroless, no shell, runs as nonroot.
-# ──────────────────────────────────────────────────────────────────────────────
-FROM gcr.io/distroless/static-debian12:nonroot AS runtime
+FROM alpine:3.22 AS runtime
+
+RUN apk add --no-cache ca-certificates tzdata wget && \
+    addgroup -S app && adduser -S -G app app
 
 WORKDIR /app
 
-COPY --from=builder --chown=nonroot:nonroot /out/api /app/api
-COPY --from=builder --chown=nonroot:nonroot /src/envs ./envs
+ENV APP_PORT=4001 \
+    APP_ENV=production \
+    TZ=Asia/Jakarta
 
-USER nonroot:nonroot
+COPY --from=builder --chown=app:app /out/api /app/api
 
-EXPOSE 4000
+USER app:app
+
+EXPOSE 4001
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+    CMD wget -qO- "http://127.0.0.1:${APP_PORT}/health" >/dev/null 2>&1 || exit 1
 
 ENTRYPOINT ["/app/api"]

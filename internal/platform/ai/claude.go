@@ -27,48 +27,79 @@ func (c *Client) Ask(ctx context.Context, prompt string) (string, error) {
 }
 
 func (c *Client) AskWithSystem(ctx context.Context, system, prompt string) (string, error) {
-	params := anthropic.MessageNewParams{
-		MaxTokens: 2048,
-		Model:     c.model,
-		Messages: []anthropic.MessageParam{
-			anthropic.NewUserMessage(anthropic.NewTextBlock(prompt)),
-		},
-	}
-	if system != "" {
-		params.System = []anthropic.TextBlockParam{{Text: system}}
+	models := []anthropic.Model{c.model}
+
+	var lastErr error
+	for _, model := range models {
+		params := anthropic.MessageNewParams{
+			MaxTokens: 2048,
+			Model:     model,
+			Messages: []anthropic.MessageParam{
+				anthropic.NewUserMessage(anthropic.NewTextBlock(prompt)),
+			},
+		}
+		if system != "" {
+			params.System = []anthropic.TextBlockParam{{
+				Text:         system,
+				CacheControl: anthropic.NewCacheControlEphemeralParam(),
+			}}
+		}
+
+		msg, err := c.sdk.Messages.New(ctx, params)
+		if err != nil {
+			lastErr = err
+			if ctx.Err() != nil {
+				return "", ctx.Err()
+			}
+			continue
+		}
+		if len(msg.Content) == 0 {
+			lastErr = fmt.Errorf("empty response from model %s", model)
+			continue
+		}
+		return msg.Content[0].Text, nil
 	}
 
-	msg, err := c.sdk.Messages.New(ctx, params)
-	if err != nil {
-		return "", fmt.Errorf("anthropic messages.new: %w", err)
-	}
-	if len(msg.Content) == 0 {
-		return "", fmt.Errorf("anthropic: empty response")
-	}
-	return msg.Content[0].Text, nil
+	return "", fmt.Errorf("anthropic messages.new failed after %d attempts. last error: %w", len(models), lastErr)
 }
 
 func (c *Client) AskImage(ctx context.Context, system, prompt, mediaType, base64Data string) (string, error) {
-	params := anthropic.MessageNewParams{
-		MaxTokens: 2048,
-		Model:     c.model,
-		Messages: []anthropic.MessageParam{
-			anthropic.NewUserMessage(
-				anthropic.NewImageBlockBase64(mediaType, base64Data),
-				anthropic.NewTextBlock(prompt),
-			),
-		},
-	}
-	if system != "" {
-		params.System = []anthropic.TextBlockParam{{Text: system}}
+	// Use the configured model only. The app already reads CLAUDE_MODEL from env.
+	models := []anthropic.Model{c.model}
+
+	var lastErr error
+	for _, model := range models {
+		params := anthropic.MessageNewParams{
+			MaxTokens: 2048,
+			Model:     model,
+			Messages: []anthropic.MessageParam{
+				anthropic.NewUserMessage(
+					anthropic.NewImageBlockBase64(mediaType, base64Data),
+					anthropic.NewTextBlock(prompt),
+				),
+			},
+		}
+		if system != "" {
+			params.System = []anthropic.TextBlockParam{{
+				Text:         system,
+				CacheControl: anthropic.NewCacheControlEphemeralParam(),
+			}}
+		}
+
+		msg, err := c.sdk.Messages.New(ctx, params)
+		if err != nil {
+			lastErr = err
+			if ctx.Err() != nil {
+				return "", ctx.Err()
+			}
+			continue
+		}
+		if len(msg.Content) == 0 {
+			lastErr = fmt.Errorf("empty response from model %s", model)
+			continue
+		}
+		return msg.Content[0].Text, nil
 	}
 
-	msg, err := c.sdk.Messages.New(ctx, params)
-	if err != nil {
-		return "", fmt.Errorf("anthropic messages.new (image): %w", err)
-	}
-	if len(msg.Content) == 0 {
-		return "", fmt.Errorf("anthropic: empty response")
-	}
-	return msg.Content[0].Text, nil
+	return "", fmt.Errorf("anthropic messages.new (image) failed after %d attempts. last error: %w", len(models), lastErr)
 }

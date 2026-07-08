@@ -19,11 +19,17 @@ import (
 
 type fakeRepo struct {
 	users     map[uuid.UUID]*domain.User
+	history   map[uuid.UUID][]domain.UserPasswordHistory
 	updateErr error
 	createErr error
 }
 
-func newFakeRepo() *fakeRepo { return &fakeRepo{users: map[uuid.UUID]*domain.User{}} }
+func newFakeRepo() *fakeRepo {
+	return &fakeRepo{
+		users:   map[uuid.UUID]*domain.User{},
+		history: map[uuid.UUID][]domain.UserPasswordHistory{},
+	}
+}
 
 func (r *fakeRepo) FindAll(page, limit int, search string) ([]domain.User, int64, error) {
 	out := make([]domain.User, 0, len(r.users))
@@ -53,6 +59,26 @@ func (r *fakeRepo) FindByEmail(email string) (*domain.User, error) {
 	return nil, domain.ErrNotFound
 }
 
+func (r *fakeRepo) FindByTelegramChatID(chatID string) (*domain.User, error) {
+	for _, u := range r.users {
+		if u.TelegramChatID != nil && *u.TelegramChatID == chatID {
+			copy := *u
+			return &copy, nil
+		}
+	}
+	return nil, domain.ErrNotFound
+}
+
+func (r *fakeRepo) FindByReferralCode(code string) (*domain.User, error) {
+	for _, u := range r.users {
+		if u.Referral != nil && u.Referral.Code == strings.ToUpper(strings.TrimSpace(code)) {
+			copy := *u
+			return &copy, nil
+		}
+	}
+	return nil, domain.ErrNotFound
+}
+
 func (r *fakeRepo) Create(u *domain.User) error {
 	if r.createErr != nil {
 		return r.createErr
@@ -71,6 +97,129 @@ func (r *fakeRepo) Update(u *domain.User) error {
 	}
 	copy := *u
 	r.users[u.ID] = &copy
+	return nil
+}
+
+func (r *fakeRepo) UpsertResetOTP(userID uuid.UUID, codeHash string, expiresAt time.Time) error {
+	return r.UpsertOTP(userID, "password_reset", codeHash, expiresAt)
+}
+
+func (r *fakeRepo) UpsertOTP(userID uuid.UUID, purpose, codeHash string, expiresAt time.Time) error {
+	u, ok := r.users[userID]
+	if !ok {
+		return domain.ErrNotFound
+	}
+	u.OTP = &domain.UserOTP{UserID: userID, Purpose: purpose, CodeHash: codeHash, ExpiresAt: expiresAt}
+	return nil
+}
+
+func (r *fakeRepo) FindOTP(userID uuid.UUID, purpose string) (*domain.UserOTP, error) {
+	u, ok := r.users[userID]
+	if !ok || u.OTP == nil || u.OTP.Purpose != purpose {
+		return nil, domain.ErrNotFound
+	}
+	copy := *u.OTP
+	return &copy, nil
+}
+
+func (r *fakeRepo) DeleteOTP(id uuid.UUID) (bool, error) {
+	for _, u := range r.users {
+		if u.OTP != nil && u.OTP.ID == id {
+			u.OTP = nil
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (r *fakeRepo) ClearResetOTP(userID uuid.UUID) error {
+	return r.ClearOTP(userID, "password_reset")
+}
+
+func (r *fakeRepo) ClearOTP(userID uuid.UUID, purpose string) error {
+	u, ok := r.users[userID]
+	if !ok {
+		return domain.ErrNotFound
+	}
+	if u.OTP != nil && u.OTP.Purpose == purpose {
+		u.OTP = nil
+	}
+	return nil
+}
+
+func (r *fakeRepo) ListPasswordHistory(userID uuid.UUID, limit int) ([]domain.UserPasswordHistory, error) {
+	rows := append([]domain.UserPasswordHistory(nil), r.history[userID]...)
+	if limit > 0 && len(rows) > limit {
+		rows = rows[:limit]
+	}
+	return rows, nil
+}
+
+func (r *fakeRepo) AddPasswordHistory(userID uuid.UUID, passwordHash string) error {
+	if _, ok := r.users[userID]; !ok {
+		return domain.ErrNotFound
+	}
+	r.history[userID] = append([]domain.UserPasswordHistory{{
+		ID:           uuid.New(),
+		UserID:       userID,
+		PasswordHash: passwordHash,
+		CreatedAt:    time.Now(),
+	}}, r.history[userID]...)
+	if len(r.history[userID]) > 5 {
+		r.history[userID] = r.history[userID][:5]
+	}
+	return nil
+}
+
+func (r *fakeRepo) EnsureReferralCode(userID uuid.UUID, code string) (*domain.UserReferral, error) {
+	u, ok := r.users[userID]
+	if !ok {
+		return nil, domain.ErrNotFound
+	}
+	if u.Referral == nil {
+		u.Referral = &domain.UserReferral{UserID: userID, Code: strings.ToUpper(strings.TrimSpace(code))}
+	}
+	return u.Referral, nil
+}
+
+func (r *fakeRepo) AddReferralReward(id uuid.UUID, amount int64) error {
+	u, ok := r.users[id]
+	if !ok {
+		return domain.ErrNotFound
+	}
+	if u.Referral == nil {
+		u.Referral = &domain.UserReferral{UserID: id}
+	}
+	u.Referral.Reward += amount
+	return nil
+}
+
+func (r *fakeRepo) BindTelegramChatID(userID uuid.UUID, chatID string) error {
+	u, ok := r.users[userID]
+	if !ok {
+		return domain.ErrNotFound
+	}
+	u.TelegramChatID = &chatID
+	return nil
+}
+
+func (r *fakeRepo) UpdateTelegramUsernameByChatID(chatID, username string) error {
+	for _, u := range r.users {
+		if u.TelegramChatID != nil && *u.TelegramChatID == chatID {
+			u.TelegramUsername = &username
+			return nil
+		}
+	}
+	return nil
+}
+
+func (r *fakeRepo) DisconnectTelegram(userID uuid.UUID) error {
+	u, ok := r.users[userID]
+	if !ok {
+		return domain.ErrNotFound
+	}
+	u.TelegramChatID = nil
+	u.TelegramUsername = nil
 	return nil
 }
 
@@ -131,6 +280,17 @@ func (s *fakeStorage) Delete(ctx context.Context, key string) error {
 	return nil
 }
 
+func (s *fakeStorage) DeletePrefixOlderThan(ctx context.Context, prefix string, olderThan time.Duration) (int, error) {
+	deleted := 0
+	for key := range s.objects {
+		if strings.HasPrefix(key, prefix) {
+			delete(s.objects, key)
+			deleted++
+		}
+	}
+	return deleted, nil
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
@@ -143,19 +303,19 @@ func newSvc() (*fakeRepo, *fakeStorage, Service) {
 
 func TestService_Create_PromotesPhoto(t *testing.T) {
 	repo, st, svc := newSvc()
-	st.put("temp/users/avatar-abcd.png")
+	st.put("Temp/Users/avatar-abcd.png")
 
 	resp, err := svc.Create(context.Background(), dto.CreateUserRequest{
 		Name: "John", Email: "john@example.com", Password: "secret123",
-		Photo: "temp/users/avatar-abcd.png",
+		Photo: "Temp/Users/avatar-abcd.png",
 	})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if !strings.HasPrefix(resp.Photo, "users/") {
+	if !strings.HasPrefix(resp.Photo, "Users/") {
 		t.Errorf("photo not promoted: %q", resp.Photo)
 	}
-	if st.has("temp/users/avatar-abcd.png") {
+	if st.has("Temp/Users/avatar-abcd.png") {
 		t.Error("temp object should be moved")
 	}
 	if !st.has(resp.Photo) {
@@ -171,18 +331,18 @@ func TestService_Create_PromotesPhoto(t *testing.T) {
 
 func TestService_Create_RollbackPhotoOnDBError(t *testing.T) {
 	repo, st, svc := newSvc()
-	st.put("temp/users/avatar-abcd.png")
+	st.put("Temp/Users/avatar-abcd.png")
 	repo.createErr = errors.New("db down")
 
 	_, err := svc.Create(context.Background(), dto.CreateUserRequest{
 		Name: "John", Email: "john@example.com", Password: "secret123",
-		Photo: "temp/users/avatar-abcd.png",
+		Photo: "Temp/Users/avatar-abcd.png",
 	})
 	if err == nil {
 		t.Fatal("expected error")
 	}
 	for k := range st.objects {
-		if strings.HasPrefix(k, "users/") {
+		if strings.HasPrefix(k, "Users/") {
 			t.Errorf("promoted object %q should have been rolled back", k)
 		}
 	}
@@ -203,15 +363,15 @@ func TestService_Create_DuplicateEmail(t *testing.T) {
 func TestService_Update_PromotesAndDeletesOldPhoto(t *testing.T) {
 	repo, st, svc := newSvc()
 	id := uuid.New()
-	st.put("users/" + id.String() + "/old.png")
+	st.put("Users/" + id.String() + "/old.png")
 	repo.users[id] = &domain.User{
 		ID: id, Name: "Old", Email: "old@example.com", Password: "x", Role: "user",
-		Photo: "users/" + id.String() + "/old.png",
+		Photo: "Users/" + id.String() + "/old.png",
 	}
-	st.put("temp/users/avatar-new.png")
+	st.put("Temp/Users/avatar-new.png")
 
 	resp, err := svc.Update(context.Background(), id, dto.UpdateUserRequest{
-		Name: "New", Photo: "temp/users/avatar-new.png",
+		Name: "New", Photo: "Temp/Users/avatar-new.png",
 	})
 	if err != nil {
 		t.Fatalf("update: %v", err)
@@ -219,13 +379,13 @@ func TestService_Update_PromotesAndDeletesOldPhoto(t *testing.T) {
 	if resp.Name != "New" {
 		t.Errorf("name = %q", resp.Name)
 	}
-	if !strings.HasPrefix(resp.Photo, "users/") || !strings.HasSuffix(resp.Photo, "avatar-new.png") {
+	if !strings.HasPrefix(resp.Photo, "Users/") || !strings.HasSuffix(resp.Photo, "avatar-new.png") {
 		t.Errorf("photo = %q", resp.Photo)
 	}
-	if st.has("users/" + id.String() + "/old.png") {
+	if st.has("Users/" + id.String() + "/old.png") {
 		t.Error("old photo should be deleted")
 	}
-	if st.has("temp/users/avatar-new.png") {
+	if st.has("Temp/Users/avatar-new.png") {
 		t.Error("temp photo should be moved")
 	}
 }
@@ -234,17 +394,17 @@ func TestService_Update_RollbackPhotoOnDBError(t *testing.T) {
 	repo, st, svc := newSvc()
 	id := uuid.New()
 	repo.users[id] = &domain.User{ID: id, Name: "X", Email: "x@example.com", Password: "p", Role: "user"}
-	st.put("temp/users/avatar-new.png")
+	st.put("Temp/Users/avatar-new.png")
 	repo.updateErr = errors.New("db down")
 
 	_, err := svc.Update(context.Background(), id, dto.UpdateUserRequest{
-		Photo: "temp/users/avatar-new.png",
+		Photo: "Temp/Users/avatar-new.png",
 	})
 	if err == nil {
 		t.Fatal("expected error")
 	}
 	for k := range st.objects {
-		if strings.HasPrefix(k, "users/") {
+		if strings.HasPrefix(k, "Users/") {
 			t.Errorf("promoted object %q should have been rolled back", k)
 		}
 	}
@@ -253,7 +413,7 @@ func TestService_Update_RollbackPhotoOnDBError(t *testing.T) {
 func TestService_DeletePhoto(t *testing.T) {
 	repo, st, svc := newSvc()
 	id := uuid.New()
-	key := "users/" + id.String() + "/x.png"
+	key := "Users/" + id.String() + "/x.png"
 	st.put(key)
 	repo.users[id] = &domain.User{ID: id, Name: "X", Email: "x@example.com", Password: "p", Role: "user", Photo: key}
 
@@ -288,5 +448,44 @@ func TestService_List_DefaultsAndSearch(t *testing.T) {
 	}
 	if meta.Page != 1 || meta.Limit != 10 {
 		t.Errorf("defaults wrong: page=%d limit=%d", meta.Page, meta.Limit)
+	}
+}
+
+func TestService_BindTelegram_ValidatesChatID(t *testing.T) {
+	_, _, svc := newSvc()
+	id := uuid.New()
+
+	if _, err := svc.BindTelegram(context.Background(), id, dto.BindTelegramRequest{ChatID: "abc"}); err == nil {
+		t.Fatal("expected invalid chat id error")
+	}
+	if _, err := svc.BindTelegram(context.Background(), id, dto.BindTelegramRequest{ChatID: "1234"}); err == nil {
+		t.Fatal("expected too-short chat id error")
+	}
+}
+
+func TestService_BindTelegram_SavesValidChatID(t *testing.T) {
+	repo, _, svc := newSvc()
+	id := uuid.New()
+	repo.users[id] = &domain.User{ID: id, Name: "User", Email: "u@example.com", Role: "user", Password: "x"}
+
+	resp, err := svc.BindTelegram(context.Background(), id, dto.BindTelegramRequest{ChatID: "123456789"})
+	if err != nil {
+		t.Fatalf("bind telegram: %v", err)
+	}
+	if resp.TelegramChatID != "123456789" {
+		t.Fatalf("telegram_chat_id = %q", resp.TelegramChatID)
+	}
+}
+
+func TestService_BindTelegram_RejectsUsedChatID(t *testing.T) {
+	repo, _, svc := newSvc()
+	id := uuid.New()
+	otherID := uuid.New()
+	chatID := "123456789"
+	repo.users[id] = &domain.User{ID: id, Name: "User", Email: "u@example.com", Role: "user", Password: "x"}
+	repo.users[otherID] = &domain.User{ID: otherID, Name: "Other", Email: "o@example.com", Role: "user", Password: "x", TelegramChatID: &chatID}
+
+	if _, err := svc.BindTelegram(context.Background(), id, dto.BindTelegramRequest{ChatID: chatID}); err == nil {
+		t.Fatal("expected duplicate chat id error")
 	}
 }
