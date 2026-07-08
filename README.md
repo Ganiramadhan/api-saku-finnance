@@ -364,6 +364,34 @@ Services included:
 
 ---
 
+# CI/CD Deployment
+
+Production deployment uses `docker-compose.prd.yaml` and Jenkins. The pipeline builds the Go API image, pushes it to the registry, uploads the production compose file and secret `.env` to the server deploy directory, then runs `docker compose up -d` with a health check and rollback image tracking.
+
+Expected Jenkins credentials:
+
+- `saku-finance-api-env` as secret file containing the production API `.env`
+- `saku-finance-api-deploy-path` as secret text containing the absolute server deploy directory
+- `docker-registry-host` as secret text, without protocol
+- `docker-registry-username` as secret text
+- `docker-registry-credentials` as secret text for the registry password or access token
+- `ganipedia-host-ssh-server` as secret text
+- `ganipedia-host-ssh-port` as secret text
+- `ganipedia-host-ssh-user` as secret text
+- `ganipedia-host-ssh-password` as secret text
+
+The server deploy directory is expected to contain:
+
+```text
+docker-compose.prd.yaml
+.env
+.previous_image
+```
+
+The API is attached to the `saku-finance` Docker network with alias `api-saku-finance` and listens on internal port `4001`.
+
+---
+
 # Environment Variables
 
 ```env

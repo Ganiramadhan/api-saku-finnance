@@ -36,6 +36,7 @@ envs/.env
 README.md
 CLAUDE.MD
 docker-compose.yml
+docker-compose.prd.yaml
 
 # Logs
 *.log
