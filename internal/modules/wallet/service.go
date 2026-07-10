@@ -287,6 +287,14 @@ func (s *service) enforceFreeWalletLimit(ctx context.Context, userID uuid.UUID) 
 				limit = premiumWalletLimit
 				message = "Premium plan includes unlimited wallets"
 			}
+		} else {
+			hasPaidHistory, err := s.subscriptions.HasPaidSubscriptionHistory(ctx, userID)
+			if err != nil {
+				return err
+			}
+			if hasPaidHistory {
+				return fiber.NewError(fiber.StatusForbidden, "Your subscription has expired. Renew your plan to create more wallets")
+			}
 		}
 	}
 	rows, err := s.repo.List(userID)
