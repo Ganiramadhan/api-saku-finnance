@@ -327,6 +327,21 @@ func (a *App) runReminderPass(
 			if item.User == nil || daysUntilUTC(today, item.DueDate) != 7 {
 				continue
 			}
+			hasPaidHistory, err := subRepo.HasPaidSubscriptionHistory(item.UserID)
+			if err != nil {
+				log.Printf("reminder: check subscription history for billing %s: %v", item.ID, err)
+				continue
+			}
+			if hasPaidHistory {
+				hasActivePaid, err := subRepo.HasCurrentActivePaidSubscription(item.UserID, today)
+				if err != nil {
+					log.Printf("reminder: check active subscription for billing %s: %v", item.ID, err)
+					continue
+				}
+				if !hasActivePaid {
+					continue
+				}
+			}
 			title := "Bill reminder in 7 days"
 			message := fmt.Sprintf("%s is due on %s for %s.", item.Name, item.DueDate.Format("02 Jan 2006"), formatMoney(item.Amount, item.Currency))
 			_ = notificationSvc.Create(ctx, domain.Notification{
@@ -374,7 +389,15 @@ func (a *App) runReminderPass(
 			)
 			continue
 		}
-		if daysLeft == 0 {
+		if daysLeft <= 0 {
+			if daysLeft < 0 {
+				sub.Status = domain.SubscriptionStatusExpired
+				sub.NextBillingAt = nil
+				if err := subRepo.UpdateSubscription(&sub); err != nil {
+					log.Printf("reminder: expire overdue subscription %s: %v", sub.ID, err)
+				}
+				continue
+			}
 			title := "Your SAKU subscription has ended"
 			message := fmt.Sprintf("Your %s subscription period ended on %s. Create a new invoice to continue using Pro features.", sub.Plan.Name, due.Format("02 Jan 2006"))
 			_ = notificationSvc.Create(ctx, domain.Notification{

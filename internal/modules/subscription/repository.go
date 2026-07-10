@@ -30,6 +30,7 @@ type Repository interface {
 	FindActiveByUserID(userID uuid.UUID) (*domain.Subscription, error)
 	FindPendingByUserID(userID uuid.UUID) (*domain.Subscription, error)
 	HasPaidSubscriptionHistory(userID uuid.UUID) (bool, error)
+	HasCurrentActivePaidSubscription(userID uuid.UUID, now time.Time) (bool, error)
 	FindByUserID(userID, id uuid.UUID) (*domain.Subscription, error)
 	ListByUserID(userID uuid.UUID) ([]domain.Subscription, error)
 	ListAll(limit, offset int) ([]domain.Subscription, error)
@@ -198,6 +199,19 @@ func (r *repository) HasPaidSubscriptionHistory(userID uuid.UUID) (bool, error) 
 		Where("subscriptions.user_id = ?", userID).
 		Where("subscriptions.payment_status = ?", domain.PaymentStatusPaid).
 		Where("plans.price > 0").
+		Count(&total).Error
+	return total > 0, err
+}
+
+func (r *repository) HasCurrentActivePaidSubscription(userID uuid.UUID, now time.Time) (bool, error) {
+	var total int64
+	err := r.db.Model(&domain.Subscription{}).
+		Joins("JOIN plans ON plans.id = subscriptions.plan_id").
+		Where("subscriptions.user_id = ?", userID).
+		Where("subscriptions.status = ?", domain.SubscriptionStatusActive).
+		Where("subscriptions.payment_status = ?", domain.PaymentStatusPaid).
+		Where("plans.price > 0").
+		Where("subscriptions.ends_at IS NULL OR subscriptions.ends_at > ?", now.UTC()).
 		Count(&total).Error
 	return total > 0, err
 }

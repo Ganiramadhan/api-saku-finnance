@@ -727,6 +727,9 @@ func friendlyError(err error) string {
 		return ""
 	}
 	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "subscription has expired") {
+		return "Langganan SAKU kamu sudah habis. Perpanjang paket dulu supaya bisa lanjut memakai AI dan Telegram."
+	}
 	if strings.Contains(msg, "limit") || strings.Contains(msg, "quota") {
 		return "Kuota AI bulanan kamu sudah habis. Upgrade ke Pro atau Premium supaya bisa lanjut mencatat transaksi dan bertanya lewat Telegram."
 	}
@@ -744,6 +747,9 @@ func friendlyChatError(err error) string {
 		return ""
 	}
 	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "subscription has expired") {
+		return "Langganan SAKU kamu sudah habis. Perpanjang paket dulu supaya bisa lanjut bertanya dari Telegram."
+	}
 	if strings.Contains(msg, "limit") || strings.Contains(msg, "quota") || strings.Contains(msg, "free plan includes") || strings.Contains(msg, "monthly ai") {
 		return "Kuota AI bulanan kamu sudah habis. Upgrade ke Pro atau Premium supaya bisa lanjut bertanya soal cashflow dan transaksi dari Telegram."
 	}

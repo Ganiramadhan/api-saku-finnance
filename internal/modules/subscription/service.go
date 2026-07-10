@@ -41,6 +41,7 @@ type Service interface {
 	HasActiveProSubscription(ctx context.Context, userID uuid.UUID) (bool, error)
 	ActivePlanCode(ctx context.Context, userID uuid.UUID) (string, bool, error)
 	HasPaidSubscriptionHistory(ctx context.Context, userID uuid.UUID) (bool, error)
+	HasCurrentActivePaidSubscription(ctx context.Context, userID uuid.UUID) (bool, error)
 	// Admin
 	ListAllAdmin(ctx context.Context, limit, offset int) ([]dto.AdminSubscriptionResponse, error)
 	ListVouchersAdmin(ctx context.Context, limit, offset int) ([]dto.VoucherResponse, error)
@@ -584,6 +585,11 @@ func (s *service) MySubscriptions(ctx context.Context, userID uuid.UUID) ([]dto.
 				return nil, err
 			}
 		}
+		if expireActiveSubscriptionIfNeeded(&r, now) {
+			if err := s.repo.UpdateSubscription(&r); err != nil {
+				return nil, err
+			}
+		}
 		out = append(out, toSubResp(r))
 	}
 	return out, nil
@@ -618,6 +624,12 @@ func (s *service) ActiveSubscription(_ context.Context, userID uuid.UUID) (*dto.
 	row, err := s.repo.FindActiveByUserID(userID)
 	if err != nil {
 		return nil, err
+	}
+	if expireActiveSubscriptionIfNeeded(row, time.Now().UTC()) {
+		if err := s.repo.UpdateSubscription(row); err != nil {
+			return nil, err
+		}
+		return nil, domain.ErrNotFound
 	}
 	if row.Plan == nil {
 		if p, err := s.repo.FindPlanByID(row.PlanID); err == nil {
@@ -1352,6 +1364,10 @@ func (s *service) HasPaidSubscriptionHistory(_ context.Context, userID uuid.UUID
 	return s.repo.HasPaidSubscriptionHistory(userID)
 }
 
+func (s *service) HasCurrentActivePaidSubscription(_ context.Context, userID uuid.UUID) (bool, error) {
+	return s.repo.HasCurrentActivePaidSubscription(userID, time.Now().UTC())
+}
+
 func isCurrentlyActiveSubscription(sub *domain.Subscription, now time.Time) bool {
 	if sub == nil || sub.Status != domain.SubscriptionStatusActive {
 		return false
@@ -1359,5 +1375,17 @@ func isCurrentlyActiveSubscription(sub *domain.Subscription, now time.Time) bool
 	if sub.EndsAt != nil && !now.Before(sub.EndsAt.UTC()) {
 		return false
 	}
+	return true
+}
+
+func expireActiveSubscriptionIfNeeded(sub *domain.Subscription, now time.Time) bool {
+	if sub == nil || sub.Status != domain.SubscriptionStatusActive {
+		return false
+	}
+	if sub.EndsAt == nil || now.Before(sub.EndsAt.UTC()) {
+		return false
+	}
+	sub.Status = domain.SubscriptionStatusExpired
+	sub.NextBillingAt = nil
 	return true
 }

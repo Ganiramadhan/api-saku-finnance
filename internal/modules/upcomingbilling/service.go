@@ -109,6 +109,14 @@ func (s *service) enforceBillingLimit(ctx context.Context, userID uuid.UUID) err
 				limit = premiumBillingLimit
 				message = "Premium plan includes unlimited upcoming billings"
 			}
+		} else {
+			hasPaidHistory, err := s.subscriptions.HasPaidSubscriptionHistory(ctx, userID)
+			if err != nil {
+				return err
+			}
+			if hasPaidHistory {
+				return fiber.NewError(fiber.StatusForbidden, "Your subscription has expired. Renew your plan to create billing reminders")
+			}
 		}
 	}
 	rows, err := s.repo.List(userID)

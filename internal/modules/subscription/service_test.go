@@ -95,3 +95,24 @@ func TestIsCurrentlyActiveSubscriptionRequiresFutureEndDate(t *testing.T) {
 		t.Fatal("expected future-ended active row to be active")
 	}
 }
+
+func TestExpireActiveSubscriptionIfNeededMarksOverdueSubscriptionExpired(t *testing.T) {
+	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
+	past := now.Add(-time.Second)
+	nextBilling := past
+	sub := &domain.Subscription{
+		Status:        domain.SubscriptionStatusActive,
+		EndsAt:        &past,
+		NextBillingAt: &nextBilling,
+	}
+
+	if !expireActiveSubscriptionIfNeeded(sub, now) {
+		t.Fatal("expected overdue subscription to be expired")
+	}
+	if sub.Status != domain.SubscriptionStatusExpired {
+		t.Fatalf("expected expired status, got %q", sub.Status)
+	}
+	if sub.NextBillingAt != nil {
+		t.Fatal("expected next billing to be cleared")
+	}
+}
