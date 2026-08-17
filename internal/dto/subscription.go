@@ -33,15 +33,14 @@ func (r *CheckoutRequest) Sanitize() {
 type CheckoutResponse struct {
 	SubscriptionID uuid.UUID  `json:"subscription_id"`
 	OrderID        string     `json:"order_id"`
-	SnapToken      string     `json:"snap_token"`
-	RedirectURL    string     `json:"redirect_url"`
+	QRString       string     `json:"qr_string"`
+	QRImageURL     string     `json:"qr_image_url,omitempty"`
 	ExpiresAt      *time.Time `json:"expires_at,omitempty"`
 	PaymentStatus  string     `json:"payment_status"`
 	OriginalAmount float64    `json:"original_amount"`
 	DiscountAmount float64    `json:"discount_amount"`
 	Amount         float64    `json:"amount"`
 	VoucherCode    string     `json:"voucher_code,omitempty"`
-	ClientKey      string     `json:"client_key"`
 	IsProduction   bool       `json:"is_production"`
 }
 

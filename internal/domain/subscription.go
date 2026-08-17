@@ -63,6 +63,8 @@ type Subscription struct {
 	MidtransPaymentType string     `gorm:"type:varchar(32)"`
 	SnapToken           string     `gorm:"type:varchar(64)"`
 	SnapRedirectURL     string     `gorm:"type:varchar(255)"`
+	QRString            string     `gorm:"type:text"`         // raw QRIS EMV payload, rendered client-side into a QR image
+	QRImageURL          string     `gorm:"type:varchar(255)"` // Midtrans-hosted QR PNG; also what their sandbox simulator expects
 	PaymentStatus       string     `gorm:"type:varchar(16);not null;default:'pending';index"`
 	PaymentCreatedAt    *time.Time `gorm:"index"`
 	PaymentExpiresAt    *time.Time `gorm:"index"`
@@ -112,6 +114,8 @@ type SubscriptionPayment struct {
 	Currency       string    `gorm:"type:varchar(8);not null;default:'IDR'"`
 	SnapToken      string    `gorm:"type:varchar(64)"`
 	RedirectURL    string    `gorm:"type:varchar(255)"`
+	QRString       string    `gorm:"type:text"`
+	QRImageURL     string    `gorm:"type:varchar(255)"`
 	CreatedAt      time.Time
 	ExpiresAt      *time.Time `gorm:"index"`
 	PaidAt         *time.Time

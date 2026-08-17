@@ -27,8 +27,12 @@ vendor/
 Thumbs.db
 
 # Env (sensitive)
-envs/.env
 .env
+.env.*
+!.env.example
+envs/.env
+envs/.env.*
+!envs/.env.example
 
 # Build
 tmp/

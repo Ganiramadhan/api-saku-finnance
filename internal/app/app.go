@@ -156,7 +156,7 @@ func (a *App) initHTTP() {
 		AppName:      "SAKU API",
 		BodyLimit:    10 * 1024 * 1024,
 		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
+		WriteTimeout: 21 * time.Minute,
 		IdleTimeout:  60 * time.Second,
 		ErrorHandler: middleware.ErrorHandler,
 	})

@@ -9,7 +9,6 @@ import (
 	"math"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/ganiramadhan/starter-go/internal/domain"
@@ -25,6 +24,8 @@ const (
 	virtualAccountExpiry        = 24 * time.Hour
 	snapPageExpiry              = 24 * time.Hour
 	proLaunchDiscountRate       = 0.30
+	streamPollInterval          = 3 * time.Second  // server-side reconciliation cadence for WatchOrderStatus
+	streamMaxLifetime           = 20 * time.Minute // safety net so a stream goroutine can never outlive an invoice
 )
 
 type Service interface {
@@ -37,6 +38,11 @@ type Service interface {
 	MySubscriptions(ctx context.Context, userID uuid.UUID) ([]dto.SubscriptionResponse, error)
 	ActiveSubscription(ctx context.Context, userID uuid.UUID) (*dto.SubscriptionResponse, error)
 	ConfirmCheckout(ctx context.Context, userID uuid.UUID, req dto.ConfirmSubscriptionRequest) (*dto.SubscriptionResponse, error)
+	// WatchOrderStatus streams live status updates for a checkout order (SSE-backed).
+	// It emits an immediate snapshot, then further updates only when the payment
+	// status actually changes, until the payment reaches a terminal state or the
+	// returned cancel func is called. The caller owns the SSE framing/transport.
+	WatchOrderStatus(ctx context.Context, userID uuid.UUID, orderID string) (<-chan dto.SubscriptionResponse, func(), error)
 	Cancel(ctx context.Context, userID, id uuid.UUID) error
 	HasActiveProSubscription(ctx context.Context, userID uuid.UUID) (bool, error)
 	ActivePlanCode(ctx context.Context, userID uuid.UUID) (string, bool, error)
@@ -59,11 +65,13 @@ type service struct {
 	mailer    mailer.Mailer
 	clientKey string
 	isProd    bool
-	paymentMu sync.Mutex
+	// userLocks serializes payment-mutating operations per user instead of
+	// globally — see keyedMutex's doc comment for why and its limits.
+	userLocks *keyedMutex
 }
 
 func NewService(repo Repository, users user.Repository, m *MidtransClient, mailer mailer.Mailer, clientKey string, isProd bool) Service {
-	return &service{repo: repo, users: users, midtrans: m, mailer: mailer, clientKey: clientKey, isProd: isProd}
+	return &service{repo: repo, users: users, midtrans: m, mailer: mailer, clientKey: clientKey, isProd: isProd, userLocks: newKeyedMutex()}
 }
 
 func parseFeatures(raw string) []string {
@@ -159,8 +167,7 @@ func (s *service) ValidateVoucher(_ context.Context, req dto.ValidateVoucherRequ
 }
 
 func (s *service) Checkout(ctx context.Context, userID uuid.UUID, req dto.CheckoutRequest) (*dto.CheckoutResponse, error) {
-	s.paymentMu.Lock()
-	defer s.paymentMu.Unlock()
+	defer s.userLocks.Lock(userID)()
 
 	req.Sanitize()
 	plan, err := s.repo.FindPlanByCode(req.PlanCode)
@@ -202,21 +209,20 @@ func (s *service) Checkout(ctx context.Context, userID uuid.UUID, req dto.Checko
 				}
 				return s.createInvoice(ctx, pending, plan, effectiveVoucherCode)
 			}
-			if pending.SnapToken == "" || pending.SnapRedirectURL == "" || pending.PaymentStatus == domain.PaymentStatusExpired {
+			if (pending.QRString == "" && pending.QRImageURL == "") || pending.PaymentStatus == domain.PaymentStatusExpired {
 				return s.createInvoice(ctx, pending, plan, req.VoucherCode)
 			}
 			return &dto.CheckoutResponse{
 				SubscriptionID: pending.ID,
 				OrderID:        pending.MidtransOrderID,
-				SnapToken:      pending.SnapToken,
-				RedirectURL:    pending.SnapRedirectURL,
+				QRString:       pending.QRString,
+				QRImageURL:     pending.QRImageURL,
 				ExpiresAt:      pending.PaymentExpiresAt,
 				PaymentStatus:  pending.PaymentStatus,
 				OriginalAmount: pending.OriginalAmount,
 				DiscountAmount: pending.DiscountAmount,
 				Amount:         pending.Amount,
 				VoucherCode:    pending.VoucherCode,
-				ClientKey:      s.clientKey,
 				IsProduction:   s.isProd,
 			}, nil
 		}
@@ -268,8 +274,7 @@ func (s *service) Checkout(ctx context.Context, userID uuid.UUID, req dto.Checko
 }
 
 func (s *service) RenewInvoice(ctx context.Context, userID, subscriptionID uuid.UUID) (*dto.CheckoutResponse, error) {
-	s.paymentMu.Lock()
-	defer s.paymentMu.Unlock()
+	defer s.userLocks.Lock(userID)()
 
 	sub, err := s.repo.FindByUserID(userID, subscriptionID)
 	if err != nil {
@@ -293,10 +298,8 @@ func (s *service) RenewInvoice(ctx context.Context, userID, subscriptionID uuid.
 			sub.Plan = p
 		}
 	}
-	if strings.TrimSpace(sub.MidtransPaymentType) == "" &&
+	if (strings.TrimSpace(sub.QRString) != "" || strings.TrimSpace(sub.QRImageURL) != "") &&
 		sub.PaymentStatus == domain.PaymentStatusPending &&
-		strings.TrimSpace(sub.SnapToken) != "" &&
-		strings.TrimSpace(sub.SnapRedirectURL) != "" &&
 		(sub.PaymentExpiresAt == nil || time.Now().UTC().Before(sub.PaymentExpiresAt.UTC())) {
 		return s.checkoutResponse(sub), nil
 	}
@@ -386,25 +389,29 @@ func (s *service) createInvoice(ctx context.Context, sub *domain.Subscription, p
 		"custom_field1": fmt.Sprintf("Plan: SAKU %s", plan.Name),
 		"custom_field2": fmt.Sprintf("Duration: %s", durationLabel),
 		"custom_field3": fmt.Sprintf("Features: %s", featureSummary),
-		"credit_card": map[string]any{
-			"secure": true,
-		},
 	}
-	snap, err := s.midtrans.CreateSnapTransaction(ctx, payload)
+	// Core API charge, not Snap: we render our own QR popup from the returned
+	// qr_string instead of embedding Midtrans's hosted Snap page/iframe.
+	charge, err := s.midtrans.ChargeQRIS(ctx, payload)
 	if err != nil {
 		sub.PaymentStatus = domain.PaymentStatusFailed
 		_ = s.repo.UpdateSubscription(sub)
-		return nil, fmt.Errorf("create snap transaction: %w", err)
+		return nil, fmt.Errorf("create qris charge: %w", err)
 	}
 
 	sub.MidtransOrderID = orderID
-	sub.MidtransTxnID = ""
-	sub.MidtransPaymentType = ""
-	sub.SnapToken = snap.Token
-	sub.SnapRedirectURL = snap.RedirectURL
+	sub.MidtransTxnID = charge.TransactionID
+	sub.MidtransPaymentType = "qris"
+	sub.SnapToken = ""
+	sub.SnapRedirectURL = ""
+	sub.QRString = charge.QRString
+	sub.QRImageURL = charge.QRImageURL()
 	sub.PaymentStatus = domain.PaymentStatusPending
 	sub.PaymentCreatedAt = &now
-	defaultExpiresAt := now.Add(snapPageExpiry)
+	defaultExpiresAt := now.Add(qrisPaymentExpiry)
+	if parsed := parseMidtransTime(charge.ExpiryTime); parsed != nil {
+		defaultExpiresAt = *parsed
+	}
 	sub.PaymentExpiresAt = &defaultExpiresAt
 	sub.PaymentPaidAt = nil
 	sub.PaymentExpiredAt = nil
@@ -424,11 +431,13 @@ func (s *service) createInvoice(ctx context.Context, sub *domain.Subscription, p
 		SubscriptionID: sub.ID,
 		UserID:         sub.UserID,
 		OrderID:        orderID,
+		TransactionID:  charge.TransactionID,
+		PaymentType:    "qris",
 		Status:         domain.PaymentStatusPending,
 		Amount:         sub.Amount,
 		Currency:       sub.Currency,
-		SnapToken:      snap.Token,
-		RedirectURL:    snap.RedirectURL,
+		QRString:       charge.QRString,
+		QRImageURL:     sub.QRImageURL,
 		ExpiresAt:      &defaultExpiresAt,
 	}
 	if err := s.repo.CreatePayment(payment); err != nil {
@@ -439,15 +448,14 @@ func (s *service) createInvoice(ctx context.Context, sub *domain.Subscription, p
 	return &dto.CheckoutResponse{
 		SubscriptionID: sub.ID,
 		OrderID:        orderID,
-		SnapToken:      snap.Token,
-		RedirectURL:    snap.RedirectURL,
+		QRString:       sub.QRString,
+		QRImageURL:     sub.QRImageURL,
 		ExpiresAt:      sub.PaymentExpiresAt,
 		PaymentStatus:  sub.PaymentStatus,
 		OriginalAmount: sub.OriginalAmount,
 		DiscountAmount: sub.DiscountAmount,
 		Amount:         sub.Amount,
 		VoucherCode:    sub.VoucherCode,
-		ClientKey:      s.clientKey,
 		IsProduction:   s.isProd,
 	}, nil
 }
@@ -456,15 +464,14 @@ func (s *service) checkoutResponse(sub *domain.Subscription) *dto.CheckoutRespon
 	return &dto.CheckoutResponse{
 		SubscriptionID: sub.ID,
 		OrderID:        sub.MidtransOrderID,
-		SnapToken:      sub.SnapToken,
-		RedirectURL:    sub.SnapRedirectURL,
+		QRString:       sub.QRString,
+		QRImageURL:     sub.QRImageURL,
 		ExpiresAt:      sub.PaymentExpiresAt,
 		PaymentStatus:  sub.PaymentStatus,
 		OriginalAmount: sub.OriginalAmount,
 		DiscountAmount: sub.DiscountAmount,
 		Amount:         sub.Amount,
 		VoucherCode:    sub.VoucherCode,
-		ClientKey:      s.clientKey,
 		IsProduction:   s.isProd,
 	}
 }
@@ -478,7 +485,12 @@ func (s *service) refreshPendingPaymentStatus(ctx context.Context, sub *domain.S
 		return
 	}
 	if err := s.syncPaymentFromMidtrans(ctx, payment, sub); err != nil {
-		log.Printf("subscription: refresh pending midtrans status failed order_id=%s: %v", sub.MidtransOrderID, err)
+		// A cancelled ctx here just means whoever asked for this refresh (e.g. a
+		// WatchOrderStatus stream) stopped listening mid-request — expected, not
+		// a real failure, so don't log it at the same level as an actual problem.
+		if !errors.Is(err, context.Canceled) {
+			log.Printf("subscription: refresh pending midtrans status failed order_id=%s: %v", sub.MidtransOrderID, err)
+		}
 	}
 }
 
@@ -571,6 +583,10 @@ func subscriptionFeatureSummary(code string) []string {
 }
 
 func (s *service) MySubscriptions(ctx context.Context, userID uuid.UUID) ([]dto.SubscriptionResponse, error) {
+	// Same per-user lock as the other payment-mutating paths — this loop can
+	// write (refresh/expire) each pending row it touches.
+	defer s.userLocks.Lock(userID)()
+
 	rows, err := s.repo.ListByUserID(userID)
 	if err != nil {
 		return nil, err
@@ -621,6 +637,9 @@ func (s *service) ListAllAdmin(_ context.Context, limit, offset int) ([]dto.Admi
 }
 
 func (s *service) ActiveSubscription(_ context.Context, userID uuid.UUID) (*dto.SubscriptionResponse, error) {
+	// Guards against racing a concurrent Cancel()/renewal for the same user.
+	defer s.userLocks.Lock(userID)()
+
 	row, err := s.repo.FindActiveByUserID(userID)
 	if err != nil {
 		return nil, err
@@ -641,8 +660,7 @@ func (s *service) ActiveSubscription(_ context.Context, userID uuid.UUID) (*dto.
 }
 
 func (s *service) ConfirmCheckout(ctx context.Context, userID uuid.UUID, req dto.ConfirmSubscriptionRequest) (*dto.SubscriptionResponse, error) {
-	s.paymentMu.Lock()
-	defer s.paymentMu.Unlock()
+	defer s.userLocks.Lock(userID)()
 
 	payment, err := s.repo.FindPaymentByOrderID(req.OrderID)
 	if err != nil {
@@ -658,8 +676,8 @@ func (s *service) ConfirmCheckout(ctx context.Context, userID uuid.UUID, req dto
 				Status:         fallbackText(sub.PaymentStatus, domain.PaymentStatusPending),
 				Amount:         sub.Amount,
 				Currency:       sub.Currency,
-				SnapToken:      sub.SnapToken,
-				RedirectURL:    sub.SnapRedirectURL,
+				QRString:       sub.QRString,
+				QRImageURL:     sub.QRImageURL,
 				ExpiresAt:      sub.PaymentExpiresAt,
 				Subscription:   sub,
 			}
@@ -682,33 +700,16 @@ func (s *service) ConfirmCheckout(ctx context.Context, userID uuid.UUID, req dto
 			log.Printf("subscription: sync midtrans status failed order_id=%s: %v", payment.OrderID, err)
 		}
 	}
+	// NOTE: activation only ever happens through applyMidtransStatus, driven by a
+	// real Midtrans transaction_status (via syncPaymentFromMidtrans above, or the
+	// webhook). There used to be a "sandbox convenience" shortcut here that marked
+	// any pending order as paid whenever ConfirmCheckout was called with
+	// MIDTRANS_IS_PROD=false — harmless when confirm() only fired once after a
+	// user actually completed a Snap payment, but with QRIS polling calling
+	// confirm() every few seconds it activated subscriptions with zero payment.
 	if sub.PaymentStatus != domain.PaymentStatusPaid && s.expirePendingIfNeeded(ctx, sub, time.Now().UTC()) {
 		if err := s.repo.UpdateSubscription(sub); err != nil {
 			return nil, err
-		}
-	} else if sub.Status == domain.SubscriptionStatusPending && !s.isProd {
-		wasActive := sub.Status == domain.SubscriptionStatusActive
-		s.activate(sub)
-		from := payment.Status
-		now := time.Now().UTC()
-		payment.Status = domain.PaymentStatusPaid
-		payment.PaidAt = &now
-		if err := s.repo.UpdatePayment(payment); err != nil {
-			return nil, err
-		}
-		if from != payment.Status {
-			s.recordPaymentEvent(payment, from, payment.Status, "manual_confirm")
-		}
-		if err := s.repo.UpdateSubscription(sub); err != nil {
-			return nil, err
-		}
-		if !wasActive && sub.Status == domain.SubscriptionStatusActive {
-			if strings.TrimSpace(sub.VoucherCode) != "" && sub.DiscountAmount > 0 {
-				if err := s.repo.IncrementVoucherUsage(sub.VoucherCode); err != nil {
-					log.Printf("subscription: increment voucher usage failed code=%s: %v", sub.VoucherCode, err)
-				}
-			}
-			s.sendPaymentSuccessEmail(sub)
 		}
 	}
 	if sub.Plan == nil {
@@ -720,9 +721,115 @@ func (s *service) ConfirmCheckout(ctx context.Context, userID uuid.UUID, req dto
 	return &resp, nil
 }
 
+func (s *service) WatchOrderStatus(_ context.Context, userID uuid.UUID, orderID string) (<-chan dto.SubscriptionResponse, func(), error) {
+	orderID = strings.TrimSpace(orderID)
+	if orderID == "" {
+		return nil, nil, domain.ErrNotFound
+	}
+	sub, err := s.repo.FindByOrderID(orderID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if sub.UserID != userID {
+		return nil, nil, domain.ErrUnauthorized
+	}
+	if sub.Plan == nil {
+		if p, err := s.repo.FindPlanByID(sub.PlanID); err == nil {
+			sub.Plan = p
+		}
+	}
+
+	// A cancel func decoupled from the caller's ctx: fasthttp's RequestCtx doesn't
+	// reliably signal client disconnects through Done(), so the HTTP layer is
+	// expected to defer-call this the moment its stream-writer loop exits for any
+	// reason (disconnect, terminal event, flush error) — that's what actually stops
+	// this goroutine and its ticker, not the passed-in ctx.
+	loopCtx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(streamMaxLifetime, cancel)
+
+	out := make(chan dto.SubscriptionResponse, 2)
+
+	go func() {
+		defer close(out)
+
+		current := sub
+		lastStatus, lastPaymentStatus := current.Status, current.PaymentStatus
+
+		send := func() bool {
+			select {
+			case out <- toSubResp(*current):
+				return true
+			case <-loopCtx.Done():
+				return false
+			}
+		}
+
+		if !send() {
+			return
+		}
+		if isTerminalPaymentStatus(current) {
+			return
+		}
+
+		ticker := time.NewTicker(streamPollInterval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-loopCtx.Done():
+				return
+			case <-ticker.C:
+				fresh, err := s.repo.FindByOrderID(orderID)
+				if err != nil {
+					continue
+				}
+				current = fresh
+				if current.Status == domain.SubscriptionStatusPending {
+					// Same per-user lock Checkout/Confirm/Cancel/webhook use, so this
+					// reconciliation tick can't race a concurrent write to the same
+					// subscription from any of those paths.
+					unlock := s.userLocks.Lock(userID)
+					s.refreshPendingPaymentStatus(loopCtx, current)
+					if s.expirePendingIfNeeded(loopCtx, current, time.Now().UTC()) {
+						_ = s.repo.UpdateSubscription(current)
+					}
+					unlock()
+				}
+				if current.Status == lastStatus && current.PaymentStatus == lastPaymentStatus {
+					continue
+				}
+				lastStatus, lastPaymentStatus = current.Status, current.PaymentStatus
+				if current.Plan == nil {
+					if p, err := s.repo.FindPlanByID(current.PlanID); err == nil {
+						current.Plan = p
+					}
+				}
+				if !send() {
+					return
+				}
+				if isTerminalPaymentStatus(current) {
+					return
+				}
+			}
+		}
+	}()
+
+	return out, cancel, nil
+}
+
+// isTerminalPaymentStatus reports whether there's nothing more worth watching
+// for this order: paid, or any of the ways it can die (expired/failed/denied,
+// cancelled). Deliberately checks PaymentStatus rather than Status — on an
+// "expire" or "deny"/"failure" outcome, applyMidtransStatus intentionally
+// leaves Status as "pending" so the row stays renewable via a new invoice, but
+// PaymentStatus does flip away from "pending" in every one of these cases, so
+// it's the correct signal for "stop polling/streaming this invoice".
+func isTerminalPaymentStatus(sub *domain.Subscription) bool {
+	return sub.PaymentStatus != domain.PaymentStatusPending
+}
+
 func (s *service) Cancel(ctx context.Context, userID, id uuid.UUID) error {
-	s.paymentMu.Lock()
-	defer s.paymentMu.Unlock()
+	defer s.userLocks.Lock(userID)()
 
 	sub, err := s.repo.FindByUserID(userID, id)
 	if err != nil {
@@ -753,12 +860,14 @@ func (s *service) Cancel(ctx context.Context, userID, id uuid.UUID) error {
 }
 
 func (s *service) HandleWebhook(_ context.Context, p dto.MidtransWebhook) error {
-	s.paymentMu.Lock()
-	defer s.paymentMu.Unlock()
-
 	if !s.midtrans.VerifySignature(p.OrderID, p.StatusCode, p.GrossAmount, p.SignatureKey) {
 		return fmt.Errorf("invalid signature for order %s", p.OrderID)
 	}
+	// Read-only lookup first (a subscription's UserID never changes after it's
+	// created, so this is safe unlocked), then serialize the actual mutation
+	// per-user — same lock the rest of the payment flow uses, so a webhook can
+	// never race a concurrent Checkout/Confirm/Cancel/WatchOrderStatus tick for
+	// that same user.
 	payment, err := s.repo.FindPaymentByOrderID(p.OrderID)
 	if err != nil {
 		return err
@@ -767,6 +876,7 @@ func (s *service) HandleWebhook(_ context.Context, p dto.MidtransWebhook) error 
 	if sub == nil {
 		return domain.ErrNotFound
 	}
+	defer s.userLocks.Lock(sub.UserID)()
 	return s.applyMidtransStatus(payment, sub, p, "midtrans_"+p.TransactionStatus)
 }
 
