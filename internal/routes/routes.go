@@ -157,6 +157,7 @@ func Register(app *fiber.App, h Handlers, jwtMgr *jwt.Manager) {
 	subs.Post("/checkout", middleware.SensitiveRateLimiter(6, time.Minute, 5*time.Minute, "Too many checkout attempts. Please try again later."), h.Subscription.Checkout)
 	subs.Post("/voucher/validate", middleware.SensitiveRateLimiter(12, time.Minute, 5*time.Minute, "Too many voucher attempts. Please try again later."), h.Subscription.ValidateVoucher)
 	subs.Post("/confirm", middleware.SensitiveRateLimiter(10, time.Minute, 5*time.Minute, "Too many payment confirmation attempts. Please try again later."), h.Subscription.ConfirmCheckout)
+	subs.Get("/orders/:orderId/stream", h.Subscription.StreamStatus)
 	subs.Post("/:id/renew-invoice", middleware.SensitiveRateLimiter(6, time.Minute, 5*time.Minute, "Too many invoice attempts. Please try again later."), h.Subscription.RenewInvoice)
 	subs.Post("/:id/cancel", h.Subscription.Cancel)
 

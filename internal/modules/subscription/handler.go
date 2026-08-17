@@ -1,8 +1,12 @@
 package subscription
 
 import (
+	"bufio"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/ganiramadhan/starter-go/internal/domain"
 	"github.com/ganiramadhan/starter-go/internal/dto"
@@ -10,6 +14,7 @@ import (
 	"github.com/ganiramadhan/starter-go/pkg/validator"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
+	"github.com/valyala/fasthttp"
 )
 
 type Handler struct {
@@ -36,7 +41,7 @@ func (h *Handler) ListPlans(c *fiber.Ctx) error {
 }
 
 // Checkout godoc
-// @Summary  Create a Snap checkout for a plan
+// @Summary  Create a QRIS checkout for a plan
 // @Tags     Subscriptions
 // @Accept   json
 // @Produce  json
@@ -127,6 +132,64 @@ func (h *Handler) ConfirmCheckout(c *fiber.Ctx) error {
 		return err
 	}
 	return httpx.OK(c, "Subscription confirmed", out)
+}
+
+// StreamStatus godoc
+// @Summary  Stream live checkout status via Server-Sent Events
+// @Tags     Subscriptions
+// @Produce  text/event-stream
+// @Param    orderId path string true "Midtrans order id"
+// @Security BearerAuth
+// @Router   /api/v1/subscriptions/orders/{orderId}/stream [get]
+func (h *Handler) StreamStatus(c *fiber.Ctx) error {
+	uid, err := httpx.UserID(c)
+	if err != nil {
+		return err
+	}
+	orderID := c.Params("orderId")
+	ch, cancel, err := h.service.WatchOrderStatus(c.Context(), uid, orderID)
+	if err != nil {
+		return err
+	}
+
+	c.Set("Content-Type", "text/event-stream")
+	c.Set("Cache-Control", "no-cache")
+	c.Set("Connection", "keep-alive")
+	c.Set("X-Accel-Buffering", "no") // don't let nginx buffer this away from the client
+
+	c.Context().SetBodyStreamWriter(fasthttp.StreamWriter(func(w *bufio.Writer) {
+		defer cancel()
+
+		heartbeat := time.NewTicker(15 * time.Second)
+		defer heartbeat.Stop()
+
+		for {
+			select {
+			case resp, ok := <-ch:
+				if !ok {
+					return
+				}
+				payload, err := json.Marshal(resp)
+				if err != nil {
+					return
+				}
+				if _, err := fmt.Fprintf(w, "data: %s\n\n", payload); err != nil {
+					return
+				}
+				if err := w.Flush(); err != nil {
+					return
+				}
+			case <-heartbeat.C:
+				if _, err := fmt.Fprint(w, ": ping\n\n"); err != nil {
+					return
+				}
+				if err := w.Flush(); err != nil {
+					return
+				}
+			}
+		}
+	}))
+	return nil
 }
 
 func (h *Handler) RenewInvoice(c *fiber.Ctx) error {
