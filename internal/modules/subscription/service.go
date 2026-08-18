@@ -389,9 +389,10 @@ func (s *service) createInvoice(ctx context.Context, sub *domain.Subscription, p
 		"custom_field1": fmt.Sprintf("Plan: SAKU %s", plan.Name),
 		"custom_field2": fmt.Sprintf("Duration: %s", durationLabel),
 		"custom_field3": fmt.Sprintf("Features: %s", featureSummary),
+		"qris": map[string]any{
+			"acquirer": "gopay",
+		},
 	}
-	// Core API charge, not Snap: we render our own QR popup from the returned
-	// qr_string instead of embedding Midtrans's hosted Snap page/iframe.
 	charge, err := s.midtrans.ChargeQRIS(ctx, payload)
 	if err != nil {
 		sub.PaymentStatus = domain.PaymentStatusFailed
