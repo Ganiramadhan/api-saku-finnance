@@ -206,7 +206,7 @@ func (s *service) ChangeEmail(ctx context.Context, id uuid.UUID, req dto.ChangeE
 		return nil, domain.ErrInvalidInput
 	}
 	if err := bcrypt.CompareHashAndPassword([]byte(u.Password), []byte(req.Password)); err != nil {
-		return nil, domain.ErrInvalidCredentials
+		return nil, domain.ErrCurrentPasswordMismatch
 	}
 	if existing, _ := s.repo.FindByEmail(email); existing != nil && existing.ID != id {
 		return nil, domain.ErrAlreadyExists

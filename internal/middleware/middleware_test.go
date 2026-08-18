@@ -105,6 +105,7 @@ func TestErrorHandler_DomainErrors(t *testing.T) {
 		{"not found", domain.ErrNotFound, http.StatusNotFound},
 		{"already exists", domain.ErrAlreadyExists, http.StatusConflict},
 		{"invalid credentials", domain.ErrInvalidCredentials, http.StatusUnauthorized},
+		{"current password mismatch is not a 401", domain.ErrCurrentPasswordMismatch, http.StatusBadRequest},
 		{"unauthorized", domain.ErrUnauthorized, http.StatusUnauthorized},
 		{"invalid input", domain.ErrInvalidInput, http.StatusBadRequest},
 		{"unknown -> 500", errors.New("boom"), http.StatusInternalServerError},

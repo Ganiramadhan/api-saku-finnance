@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
 	"unicode"
 
@@ -20,9 +19,20 @@ import (
 	"github.com/ganiramadhan/starter-go/internal/modules/user"
 	"github.com/ganiramadhan/starter-go/internal/platform/mailer"
 	"github.com/ganiramadhan/starter-go/pkg/jwt"
+	"github.com/ganiramadhan/starter-go/pkg/keyedmutex"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 )
+
+var dummyPasswordHash = mustBcryptHash("saku-timing-parity-dummy-password")
+
+func mustBcryptHash(password string) []byte {
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		panic(fmt.Sprintf("auth: failed to precompute dummy password hash: %v", err))
+	}
+	return hash
+}
 
 type Service interface {
 	Login(ctx context.Context, req dto.LoginRequest) (*dto.AuthResponse, error)
@@ -36,21 +46,22 @@ type Service interface {
 }
 
 type service struct {
-	users          user.Repository
-	jwt            *jwt.Manager
-	googleClientID string
-	httpClient     *http.Client
-	mailer         mailer.Mailer
-	credentialMu   sync.Mutex
+	users           user.Repository
+	jwt             *jwt.Manager
+	googleClientID  string
+	httpClient      *http.Client
+	mailer          mailer.Mailer
+	credentialLocks *keyedmutex.KeyedMutex[uuid.UUID]
 }
 
 func NewService(users user.Repository, j *jwt.Manager, googleClientID string, mailer mailer.Mailer) Service {
 	return &service{
-		users:          users,
-		jwt:            j,
-		googleClientID: googleClientID,
-		httpClient:     &http.Client{Timeout: 10 * time.Second},
-		mailer:         mailer,
+		users:           users,
+		jwt:             j,
+		googleClientID:  googleClientID,
+		httpClient:      &http.Client{Timeout: 10 * time.Second},
+		mailer:          mailer,
+		credentialLocks: keyedmutex.New[uuid.UUID](),
 	}
 }
 
@@ -59,6 +70,7 @@ func (s *service) Login(_ context.Context, req dto.LoginRequest) (*dto.AuthRespo
 	u, err := s.users.FindByEmail(email)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
+			_ = bcrypt.CompareHashAndPassword(dummyPasswordHash, []byte(req.Password))
 			return nil, domain.ErrInvalidCredentials
 		}
 		return nil, err
@@ -145,14 +157,13 @@ func (s *service) Register(_ context.Context, req dto.RegisterRequest) (*dto.Reg
 }
 
 func (s *service) VerifyRegistration(_ context.Context, req dto.VerifyRegistrationRequest) (*dto.AuthResponse, error) {
-	s.credentialMu.Lock()
-	defer s.credentialMu.Unlock()
-
 	email := sanitizeEmail(req.Email)
 	u, err := s.users.FindByEmail(email)
 	if err != nil {
 		return nil, err
 	}
+	defer s.credentialLocks.Lock(u.ID)()
+
 	if strings.EqualFold(u.Status, "active") {
 		return nil, domain.ErrAlreadyExists
 	}
@@ -242,8 +253,7 @@ func generateOTP() (string, error) {
 }
 
 func (s *service) ChangePassword(_ context.Context, userID uuid.UUID, req dto.ChangePasswordRequest) error {
-	s.credentialMu.Lock()
-	defer s.credentialMu.Unlock()
+	defer s.credentialLocks.Lock(userID)()
 
 	u, err := s.users.FindByID(userID)
 	if err != nil {
@@ -252,7 +262,7 @@ func (s *service) ChangePassword(_ context.Context, userID uuid.UUID, req dto.Ch
 	isGoogleOnly := strings.EqualFold(u.AuthProvider, "google")
 	if !isGoogleOnly {
 		if err := bcrypt.CompareHashAndPassword([]byte(u.Password), []byte(req.CurrentPassword)); err != nil {
-			return domain.ErrInvalidCredentials
+			return domain.ErrCurrentPasswordMismatch
 		}
 	}
 	if err := validateStrongPassword(req.NewPassword); err != nil {
@@ -367,9 +377,6 @@ func forgotPasswordEmailHTML(name, email, otp string) string {
 }
 
 func (s *service) ResetPassword(_ context.Context, req dto.ResetPasswordRequest) error {
-	s.credentialMu.Lock()
-	defer s.credentialMu.Unlock()
-
 	email := strings.ToLower(strings.TrimSpace(req.Email))
 	u, err := s.users.FindByEmail(email)
 	if err != nil {
@@ -378,6 +385,8 @@ func (s *service) ResetPassword(_ context.Context, req dto.ResetPasswordRequest)
 		}
 		return err
 	}
+	defer s.credentialLocks.Lock(u.ID)()
+
 	otp, err := s.users.FindOTP(u.ID, "password_reset")
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {

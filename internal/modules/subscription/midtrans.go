@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -52,6 +53,8 @@ type SnapResponse struct {
 
 // QRISChargeResponse is the Core API /v2/charge response for payment_type=qris.
 type QRISChargeResponse struct {
+	StatusCode        string `json:"status_code"`
+	StatusMessage     string `json:"status_message"`
 	TransactionID     string `json:"transaction_id"`
 	OrderID           string `json:"order_id"`
 	GrossAmount       string `json:"gross_amount"`
@@ -153,15 +156,17 @@ func (m *MidtransClient) ChargeQRIS(ctx context.Context, payload map[string]any)
 		return nil, fmt.Errorf("midtrans qris charge decode: %w", err)
 	}
 	if out.QRString == "" && out.QRImageURL() == "" {
-		return nil, errors.New("midtrans qris charge: response has neither qr_string nor a QR image action")
+		reason := strings.TrimSpace(out.StatusMessage)
+		if reason == "" {
+			reason = strings.TrimSpace(string(raw))
+		}
+		log.Printf("midtrans qris charge: is_production=%v url=%s request=%s response=%s",
+			m.isProduction, m.coreBaseURL()+"/charge", string(body), strings.TrimSpace(string(raw)))
+		return nil, fmt.Errorf("midtrans qris charge: no qr_string/QR image in response (status_code=%s): %s", out.StatusCode, reason)
 	}
 	return &out, nil
 }
 
-// QRImageURL returns the "generate-qr-code" action URL, i.e. the Midtrans-hosted
-// QR image link. This is what Midtrans's own sandbox Payment Simulator expects
-// pasted into it — the raw qr_string is a different, unrelated input there and
-// gets rejected as "QR inputted unparsable".
 func (r *QRISChargeResponse) QRImageURL() string {
 	for _, action := range r.Actions {
 		if action.Name == "generate-qr-code" && action.URL != "" {
