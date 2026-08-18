@@ -3,6 +3,7 @@ package middleware
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -128,5 +129,21 @@ func TestErrorHandler_DomainErrors(t *testing.T) {
 				t.Errorf("envelope code = %d, want %d", body.Code, tc.status)
 			}
 		})
+	}
+}
+
+func TestErrorHandler_WrappedInvalidInput_StripsGenericPrefix(t *testing.T) {
+	app := newAppWithErrorHandler()
+	app.Get("/", func(c *fiber.Ctx) error {
+		return fmt.Errorf("%w: password baru minimal 8 karakter", domain.ErrInvalidInput)
+	})
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	resp, _ := app.Test(req)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+	body := decode(t, resp.Body)
+	if body.Message != "password baru minimal 8 karakter" {
+		t.Fatalf("message = %q, want it stripped of the generic prefix", body.Message)
 	}
 }

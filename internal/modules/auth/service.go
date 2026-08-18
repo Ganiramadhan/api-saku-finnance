@@ -433,13 +433,13 @@ func (s *service) ResetPassword(_ context.Context, req dto.ResetPasswordRequest)
 
 func validateStrongPassword(password string) error {
 	if password != strings.TrimSpace(password) {
-		return fmt.Errorf("password baru tidak boleh diawali atau diakhiri spasi")
+		return fmt.Errorf("%w: password baru tidak boleh diawali atau diakhiri spasi", domain.ErrInvalidInput)
 	}
 	if len(password) < 8 {
-		return fmt.Errorf("password baru minimal 8 karakter")
+		return fmt.Errorf("%w: password baru minimal 8 karakter", domain.ErrInvalidInput)
 	}
 	if len(password) > 72 {
-		return fmt.Errorf("password baru maksimal 72 karakter")
+		return fmt.Errorf("%w: password baru maksimal 72 karakter", domain.ErrInvalidInput)
 	}
 	var hasUpper, hasLower, hasDigit bool
 	for _, r := range password {
@@ -453,7 +453,7 @@ func validateStrongPassword(password string) error {
 		}
 	}
 	if !hasUpper || !hasLower || !hasDigit {
-		return fmt.Errorf("password baru harus mengandung huruf besar, huruf kecil, dan angka")
+		return fmt.Errorf("%w: password baru harus mengandung huruf besar, huruf kecil, dan angka", domain.ErrInvalidInput)
 	}
 	return nil
 }
@@ -461,7 +461,7 @@ func validateStrongPassword(password string) error {
 func (s *service) ensurePasswordNotReused(u *domain.User, password string) error {
 	if strings.TrimSpace(u.Password) != "" {
 		if err := bcrypt.CompareHashAndPassword([]byte(u.Password), []byte(password)); err == nil {
-			return fmt.Errorf("password baru tidak boleh sama dengan password yang pernah digunakan")
+			return fmt.Errorf("%w: password baru tidak boleh sama dengan password yang pernah digunakan", domain.ErrInvalidInput)
 		}
 	}
 	history, err := s.users.ListPasswordHistory(u.ID, 5)
@@ -473,7 +473,7 @@ func (s *service) ensurePasswordNotReused(u *domain.User, password string) error
 			continue
 		}
 		if err := bcrypt.CompareHashAndPassword([]byte(item.PasswordHash), []byte(password)); err == nil {
-			return fmt.Errorf("password baru tidak boleh sama dengan password yang pernah digunakan")
+			return fmt.Errorf("%w: password baru tidak boleh sama dengan password yang pernah digunakan", domain.ErrInvalidInput)
 		}
 	}
 	return nil
