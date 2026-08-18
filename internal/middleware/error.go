@@ -27,7 +27,7 @@ func ErrorHandler(c *fiber.Ctx, err error) error {
 		message = err.Error()
 	case errors.Is(err, domain.ErrAlreadyExists):
 		code = fiber.StatusConflict
-		message = err.Error()
+		message = strings.TrimPrefix(err.Error(), domain.ErrAlreadyExists.Error()+": ")
 	case errors.Is(err, domain.ErrInvalidCredentials):
 		code = fiber.StatusUnauthorized
 		message = err.Error()
@@ -60,6 +60,12 @@ func ErrorHandler(c *fiber.Ctx, err error) error {
 		message = err.Error()
 	case errors.Is(err, domain.ErrEmailNotRegistered):
 		code = fiber.StatusNotFound
+		message = err.Error()
+	case errors.Is(err, domain.ErrConflict):
+		code = fiber.StatusConflict
+		message = strings.TrimPrefix(err.Error(), domain.ErrConflict.Error()+": ")
+	case errors.Is(err, domain.ErrPaymentGatewayUnavailable):
+		code = fiber.StatusServiceUnavailable
 		message = err.Error()
 	default:
 		var pgErr *pgconn.PgError

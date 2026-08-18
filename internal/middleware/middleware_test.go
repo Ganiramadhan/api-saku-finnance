@@ -109,6 +109,8 @@ func TestErrorHandler_DomainErrors(t *testing.T) {
 		{"current password mismatch is not a 401", domain.ErrCurrentPasswordMismatch, http.StatusBadRequest},
 		{"unauthorized", domain.ErrUnauthorized, http.StatusUnauthorized},
 		{"invalid input", domain.ErrInvalidInput, http.StatusBadRequest},
+		{"conflict is not a 500", domain.ErrConflict, http.StatusConflict},
+		{"payment gateway unavailable is not a 500", domain.ErrPaymentGatewayUnavailable, http.StatusServiceUnavailable},
 		{"unknown -> 500", errors.New("boom"), http.StatusInternalServerError},
 		{"fiber error passthrough", fiber.NewError(http.StatusTeapot, "tea"), http.StatusTeapot},
 	}
@@ -145,5 +147,37 @@ func TestErrorHandler_WrappedInvalidInput_StripsGenericPrefix(t *testing.T) {
 	body := decode(t, resp.Body)
 	if body.Message != "password baru minimal 8 karakter" {
 		t.Fatalf("message = %q, want it stripped of the generic prefix", body.Message)
+	}
+}
+
+func TestErrorHandler_WrappedConflict_StripsGenericPrefix(t *testing.T) {
+	app := newAppWithErrorHandler()
+	app.Get("/", func(c *fiber.Ctx) error {
+		return fmt.Errorf("%w: you are already subscribed to this plan", domain.ErrConflict)
+	})
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	resp, _ := app.Test(req)
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusConflict)
+	}
+	body := decode(t, resp.Body)
+	if body.Message != "you are already subscribed to this plan" {
+		t.Fatalf("message = %q, want it stripped of the generic prefix", body.Message)
+	}
+}
+
+func TestErrorHandler_PaymentGatewayUnavailable_DoesNotLeakUnderlyingReason(t *testing.T) {
+	app := newAppWithErrorHandler()
+	app.Get("/", func(c *fiber.Ctx) error {
+		return domain.ErrPaymentGatewayUnavailable
+	})
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	resp, _ := app.Test(req)
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusServiceUnavailable)
+	}
+	body := decode(t, resp.Body)
+	if body.Message != domain.ErrPaymentGatewayUnavailable.Error() {
+		t.Fatalf("message = %q, want the clean sentinel message", body.Message)
 	}
 }
