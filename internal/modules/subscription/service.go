@@ -15,6 +15,7 @@ import (
 	"github.com/ganiramadhan/starter-go/internal/dto"
 	"github.com/ganiramadhan/starter-go/internal/modules/user"
 	"github.com/ganiramadhan/starter-go/internal/platform/mailer"
+	"github.com/ganiramadhan/starter-go/pkg/keyedmutex"
 	"github.com/google/uuid"
 )
 
@@ -66,12 +67,12 @@ type service struct {
 	clientKey string
 	isProd    bool
 	// userLocks serializes payment-mutating operations per user instead of
-	// globally — see keyedMutex's doc comment for why and its limits.
-	userLocks *keyedMutex
+	// globally — see keyedmutex's doc comment for why and its limits.
+	userLocks *keyedmutex.KeyedMutex[uuid.UUID]
 }
 
 func NewService(repo Repository, users user.Repository, m *MidtransClient, mailer mailer.Mailer, clientKey string, isProd bool) Service {
-	return &service{repo: repo, users: users, midtrans: m, mailer: mailer, clientKey: clientKey, isProd: isProd, userLocks: newKeyedMutex()}
+	return &service{repo: repo, users: users, midtrans: m, mailer: mailer, clientKey: clientKey, isProd: isProd, userLocks: keyedmutex.New[uuid.UUID]()}
 }
 
 func parseFeatures(raw string) []string {
@@ -1140,7 +1141,6 @@ func (s *service) sendPaymentSuccessEmail(sub *domain.Subscription) {
 		return
 	}
 	planName := "SAKU"
-	planPeriod := ""
 	if sub.Plan == nil {
 		if p, err := s.repo.FindPlanByID(sub.PlanID); err == nil {
 			sub.Plan = p
@@ -1148,10 +1148,9 @@ func (s *service) sendPaymentSuccessEmail(sub *domain.Subscription) {
 	}
 	if sub.Plan != nil {
 		planName = sub.Plan.Name
-		planPeriod = sub.Plan.Period
 	}
 	subject := "Your SAKU payment is confirmed"
-	body := paymentSuccessEmailHTML(u.Name, planName, planPeriod, sub.Amount, sub.Currency, sub.MidtransOrderID, sub.EndsAt)
+	body := paymentSuccessEmailHTML(u.Name, planName, sub.Amount, sub.Currency, sub.MidtransOrderID, sub.EndsAt)
 	if err := s.mailer.Send(u.Email, subject, body); err != nil {
 		log.Printf("subscription: queue payment success email failed: %v", err)
 	}
@@ -1205,10 +1204,9 @@ func paymentPendingEmailHTML(name, planName string, amount float64, currency, pa
 		expiry = expiresAt.In(location).Format("02 Jan 2006 15:04 WIB")
 	}
 	detail := fmt.Sprintf(
-		"Paket: %s\nTotal: %s %.0f\nMetode: %s\nBayar sebelum: %s\nOrder ID: %s",
+		"Paket: %s\nTotal: %s\nMetode: %s\nBayar sebelum: %s\nOrder ID: %s",
 		planName,
-		currency,
-		amount,
+		formatRupiah(amount, currency),
 		method,
 		expiry,
 		orderID,
@@ -1224,6 +1222,21 @@ func paymentPendingEmailHTML(name, planName string, amount float64, currency, pa
 		Warning:     "Jangan membuat pembayaran baru untuk order yang sama. Jika kamu sudah membayar, tunggu beberapa saat sampai status diperbarui otomatis.",
 		Footer:      "SAKU tidak pernah meminta OTP, PIN, atau data kartu melalui email. Ini adalah email otomatis, mohon tidak membalas.",
 	})
+}
+
+func formatRupiah(amount float64, currency string) string {
+	if !strings.EqualFold(currency, "IDR") && strings.TrimSpace(currency) != "" {
+		return fmt.Sprintf("%.0f %s", amount, currency)
+	}
+	raw := fmt.Sprintf("%.0f", amount)
+	var b strings.Builder
+	for i, r := range raw {
+		if i > 0 && (len(raw)-i)%3 == 0 {
+			b.WriteByte('.')
+		}
+		b.WriteRune(r)
+	}
+	return "Rp " + b.String()
 }
 
 func paymentMethodLabel(paymentType string) string {
@@ -1247,7 +1260,7 @@ func paymentMethodLabel(paymentType string) string {
 	}
 }
 
-func paymentSuccessEmailHTML(name, planName, period string, amount float64, currency, orderID string, endsAt *time.Time) string {
+func paymentSuccessEmailHTML(name, planName string, amount float64, currency, orderID string, endsAt *time.Time) string {
 	displayName := strings.TrimSpace(name)
 	if displayName == "" {
 		displayName = "SAKU user"
@@ -1256,7 +1269,7 @@ func paymentSuccessEmailHTML(name, planName, period string, amount float64, curr
 	if endsAt != nil {
 		validUntil = endsAt.Format("02 Jan 2006")
 	}
-	detail := fmt.Sprintf("Plan: %s %s\nAmount: %s %.0f\nOrder ID: %s\nActive until: %s", planName, period, currency, amount, orderID, validUntil)
+	detail := fmt.Sprintf("Plan: %s\nAmount: %s\nOrder ID: %s\nActive until: %s", planName, formatRupiah(amount, currency), orderID, validUntil)
 	return mailer.BlueTemplate(mailer.BlueTemplateData{
 		Title:       "Payment Confirmed",
 		Preheader:   "Your SAKU subscription payment has been confirmed.",

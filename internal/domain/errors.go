@@ -6,6 +6,7 @@ var (
 	ErrNotFound                = errors.New("resource not found")
 	ErrAlreadyExists           = errors.New("Email already registered")
 	ErrInvalidCredentials      = errors.New("invalid credentials")
+	ErrCurrentPasswordMismatch = errors.New("current password is incorrect")
 	ErrAccountNotVerified      = errors.New("account is not verified")
 	ErrUnauthorized            = errors.New("unauthorized")
 	ErrForbidden               = errors.New("forbidden")

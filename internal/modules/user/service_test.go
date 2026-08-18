@@ -11,6 +11,7 @@ import (
 	"github.com/ganiramadhan/starter-go/internal/domain"
 	"github.com/ganiramadhan/starter-go/internal/dto"
 	"github.com/google/uuid"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -474,6 +475,31 @@ func TestService_BindTelegram_SavesValidChatID(t *testing.T) {
 	}
 	if resp.TelegramChatID != "123456789" {
 		t.Fatalf("telegram_chat_id = %q", resp.TelegramChatID)
+	}
+}
+
+func TestService_ChangeEmail_WrongPassword_ReturnsCurrentPasswordMismatch(t *testing.T) {
+	repo, _, svc := newSvc()
+	hash, err := bcrypt.GenerateFromPassword([]byte("CorrectHorse1"), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := uuid.New()
+	repo.users[id] = &domain.User{ID: id, Name: "User", Email: "old@example.com", Password: string(hash), Role: "user"}
+
+	_, err = svc.ChangeEmail(context.Background(), id, dto.ChangeEmailRequest{
+		Email:    "new@example.com",
+		Password: "TotallyWrongPassword1",
+	})
+
+	if !errors.Is(err, domain.ErrCurrentPasswordMismatch) {
+		t.Fatalf("err = %v, want ErrCurrentPasswordMismatch", err)
+	}
+	if errors.Is(err, domain.ErrInvalidCredentials) {
+		t.Fatalf("err must not also satisfy ErrInvalidCredentials (would map to 401 and force-logout the user)")
+	}
+	if repo.users[id].Email != "old@example.com" {
+		t.Fatal("email should not have changed after a failed attempt")
 	}
 }
 

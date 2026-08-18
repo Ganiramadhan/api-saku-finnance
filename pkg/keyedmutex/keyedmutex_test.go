@@ -1,17 +1,15 @@
-package subscription
+package keyedmutex
 
 import (
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 func TestKeyedMutexSerializesSameKey(t *testing.T) {
-	km := newKeyedMutex()
-	id := uuid.New()
+	km := New[string]()
+	const key = "user-a"
 
 	var active int32
 	var maxConcurrent int32
@@ -21,7 +19,7 @@ func TestKeyedMutexSerializesSameKey(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			unlock := km.Lock(id)
+			unlock := km.Lock(key)
 			defer unlock()
 
 			n := atomic.AddInt32(&active, 1)
@@ -43,17 +41,16 @@ func TestKeyedMutexSerializesSameKey(t *testing.T) {
 }
 
 func TestKeyedMutexAllowsDifferentKeysConcurrently(t *testing.T) {
-	km := newKeyedMutex()
-	idA, idB := uuid.New(), uuid.New()
+	km := New[string]()
 
 	bothInFlight := make(chan struct{})
 	release := make(chan struct{})
 	var wg sync.WaitGroup
-
 	var entered int32
-	hold := func(id uuid.UUID) {
+
+	hold := func(key string) {
 		defer wg.Done()
-		unlock := km.Lock(id)
+		unlock := km.Lock(key)
 		defer unlock()
 		if atomic.AddInt32(&entered, 1) == 2 {
 			close(bothInFlight)
@@ -62,12 +59,11 @@ func TestKeyedMutexAllowsDifferentKeysConcurrently(t *testing.T) {
 	}
 
 	wg.Add(2)
-	go hold(idA)
-	go hold(idB)
+	go hold("user-a")
+	go hold("user-b")
 
 	select {
 	case <-bothInFlight:
-		// Good: two different keys ran concurrently without waiting on each other.
 	case <-time.After(2 * time.Second):
 		t.Fatal("locks for different keys blocked each other — expected independent locking per key")
 	}

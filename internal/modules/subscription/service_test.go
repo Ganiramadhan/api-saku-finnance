@@ -75,10 +75,41 @@ func TestPaymentPendingEmailContainsMethodExpiryAndOrder(t *testing.T) {
 		"QRIS",
 		"21 Jun 2026 16:15 WIB",
 		"SAKU-PRO-TEST123",
-		"IDR 349000",
+		"Rp 349.000",
 	} {
 		if !strings.Contains(body, expected) {
 			t.Fatalf("expected email body to contain %q", expected)
+		}
+	}
+}
+
+func TestFormatRupiahGroupsThousands(t *testing.T) {
+	cases := map[float64]string{
+		1000:    "Rp 1.000",
+		349000:  "Rp 349.000",
+		1000000: "Rp 1.000.000",
+		0:       "Rp 0",
+	}
+	for amount, want := range cases {
+		if got := formatRupiah(amount, "IDR"); got != want {
+			t.Fatalf("formatRupiah(%v, IDR) = %q, want %q", amount, got, want)
+		}
+	}
+	if got := formatRupiah(1000, "USD"); got != "1000 USD" {
+		t.Fatalf("formatRupiah(1000, USD) = %q, want %q", got, "1000 USD")
+	}
+}
+
+func TestPaymentSuccessEmailDoesNotDuplicatePeriodInPlanName(t *testing.T) {
+	endsAt := time.Date(2027, 8, 18, 0, 0, 0, 0, time.UTC)
+	body := paymentSuccessEmailHTML("Gani Ramadhan", "Pro Yearly", 1000, "IDR", "SAKU-PRO_YEARLY-TEST", &endsAt)
+
+	if strings.Contains(body, "Pro Yearly yearly") || strings.Contains(body, "Pro Yearly Yearly") {
+		t.Fatalf("expected plan name not to be duplicated with its period, got body containing: %q", body)
+	}
+	for _, expected := range []string{"Plan: Pro Yearly", "Rp 1.000", "SAKU-PRO_YEARLY-TEST", "18 Aug 2027"} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("expected email body to contain %q, got: %s", expected, body)
 		}
 	}
 }

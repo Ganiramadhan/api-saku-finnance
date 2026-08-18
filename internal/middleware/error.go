@@ -31,6 +31,9 @@ func ErrorHandler(c *fiber.Ctx, err error) error {
 	case errors.Is(err, domain.ErrInvalidCredentials):
 		code = fiber.StatusUnauthorized
 		message = err.Error()
+	case errors.Is(err, domain.ErrCurrentPasswordMismatch):
+		code = fiber.StatusBadRequest
+		message = err.Error()
 	case errors.Is(err, domain.ErrAccountNotVerified):
 		code = fiber.StatusForbidden
 		message = err.Error()
