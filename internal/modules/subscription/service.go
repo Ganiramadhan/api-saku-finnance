@@ -838,7 +838,7 @@ func (s *service) Cancel(ctx context.Context, userID, id uuid.UUID) error {
 		return err
 	}
 	if sub.Status != domain.SubscriptionStatusActive && sub.Status != domain.SubscriptionStatusPending {
-		return fmt.Errorf("subscription cannot be cancelled from status %s", sub.Status)
+		return fmt.Errorf("%w: subscription cannot be cancelled from status %s", domain.ErrInvalidInput, sub.Status)
 	}
 	if sub.Status == domain.SubscriptionStatusPending && s.midtrans != nil && strings.TrimSpace(sub.MidtransOrderID) != "" {
 		if err := s.midtrans.CancelTransaction(ctx, sub.MidtransOrderID); err != nil {

@@ -45,7 +45,7 @@ func ErrorHandler(c *fiber.Ctx, err error) error {
 		message = err.Error()
 	case errors.Is(err, domain.ErrInvalidInput):
 		code = fiber.StatusBadRequest
-		message = err.Error()
+		message = strings.TrimPrefix(err.Error(), domain.ErrInvalidInput.Error()+": ")
 	case errors.Is(err, domain.ErrGmailRequired):
 		code = fiber.StatusBadRequest
 		message = err.Error()
