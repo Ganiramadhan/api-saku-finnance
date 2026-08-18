@@ -176,7 +176,7 @@ func (s *service) Checkout(ctx context.Context, userID uuid.UUID, req dto.Checko
 		return nil, err
 	}
 	if plan.Price <= 0 {
-		return nil, fmt.Errorf("plan %q is free and does not require checkout", plan.Code)
+		return nil, fmt.Errorf("%w: plan %q is free and does not require checkout", domain.ErrInvalidInput, plan.Code)
 	}
 	if pending, err := s.repo.FindPendingByUserID(userID); err == nil && pending != nil {
 		s.refreshPendingPaymentStatus(ctx, pending)
@@ -192,7 +192,7 @@ func (s *service) Checkout(ctx context.Context, userID uuid.UUID, req dto.Checko
 		}
 		if pending.PaymentStatus == domain.PaymentStatusPending {
 			if pending.PlanID != plan.ID {
-				return nil, fmt.Errorf("you already have a pending payment. Please cancel it before choosing another plan")
+				return nil, fmt.Errorf("%w: you already have a pending payment. Please cancel it before choosing another plan", domain.ErrConflict)
 			}
 			effectiveVoucherCode := req.VoucherCode
 			if strings.TrimSpace(effectiveVoucherCode) == "" {
@@ -231,7 +231,7 @@ func (s *service) Checkout(ctx context.Context, userID uuid.UUID, req dto.Checko
 		return nil, err
 	}
 	if active, err := s.repo.FindActiveByUserID(userID); err == nil && active != nil && active.Plan != nil && active.Plan.Code == plan.Code {
-		return nil, fmt.Errorf("you are already subscribed to this plan")
+		return nil, fmt.Errorf("%w: you are already subscribed to this plan", domain.ErrConflict)
 	} else if err != nil && !errors.Is(err, domain.ErrNotFound) {
 		return nil, err
 	}
@@ -282,12 +282,12 @@ func (s *service) RenewInvoice(ctx context.Context, userID, subscriptionID uuid.
 		return nil, err
 	}
 	if sub.Status != domain.SubscriptionStatusPending {
-		return nil, fmt.Errorf("invoice can only be renewed for pending subscriptions")
+		return nil, fmt.Errorf("%w: invoice can only be renewed for pending subscriptions", domain.ErrConflict)
 	}
 	s.refreshPendingPaymentStatus(ctx, sub)
 	if sub.Status != domain.SubscriptionStatusPending ||
 		sub.PaymentStatus == domain.PaymentStatusPaid {
-		return nil, fmt.Errorf("payment has already been completed")
+		return nil, fmt.Errorf("%w: payment has already been completed", domain.ErrConflict)
 	}
 	if s.expirePendingIfNeeded(ctx, sub, time.Now().UTC()) {
 		if err := s.repo.UpdateSubscription(sub); err != nil {
@@ -307,10 +307,11 @@ func (s *service) RenewInvoice(ctx context.Context, userID, subscriptionID uuid.
 	oldOrderID := strings.TrimSpace(sub.MidtransOrderID)
 	if oldOrderID != "" {
 		if s.midtrans == nil {
-			return nil, errors.New("payment gateway is not configured")
+			return nil, domain.ErrPaymentGatewayUnavailable
 		}
 		if err := s.midtrans.CancelTransaction(ctx, oldOrderID); err != nil {
-			return nil, fmt.Errorf("cancel previous payment before changing method: %w", err)
+			log.Printf("subscription: cancel previous invoice failed order_id=%s: %v", oldOrderID, err)
+			return nil, domain.ErrPaymentGatewayUnavailable
 		}
 		if payment, err := s.repo.FindPaymentByOrderID(oldOrderID); err == nil {
 			from := payment.Status
@@ -396,9 +397,10 @@ func (s *service) createInvoice(ctx context.Context, sub *domain.Subscription, p
 	}
 	charge, err := s.midtrans.ChargeQRIS(ctx, payload)
 	if err != nil {
+		log.Printf("subscription: qris charge failed order_id=%s user_id=%s: %v", orderID, sub.UserID, err)
 		sub.PaymentStatus = domain.PaymentStatusFailed
 		_ = s.repo.UpdateSubscription(sub)
-		return nil, fmt.Errorf("create qris charge: %w", err)
+		return nil, domain.ErrPaymentGatewayUnavailable
 	}
 
 	sub.MidtransOrderID = orderID
@@ -585,8 +587,7 @@ func subscriptionFeatureSummary(code string) []string {
 }
 
 func (s *service) MySubscriptions(ctx context.Context, userID uuid.UUID) ([]dto.SubscriptionResponse, error) {
-	// Same per-user lock as the other payment-mutating paths — this loop can
-	// write (refresh/expire) each pending row it touches.
+
 	defer s.userLocks.Lock(userID)()
 
 	rows, err := s.repo.ListByUserID(userID)
@@ -702,13 +703,7 @@ func (s *service) ConfirmCheckout(ctx context.Context, userID uuid.UUID, req dto
 			log.Printf("subscription: sync midtrans status failed order_id=%s: %v", payment.OrderID, err)
 		}
 	}
-	// NOTE: activation only ever happens through applyMidtransStatus, driven by a
-	// real Midtrans transaction_status (via syncPaymentFromMidtrans above, or the
-	// webhook). There used to be a "sandbox convenience" shortcut here that marked
-	// any pending order as paid whenever ConfirmCheckout was called with
-	// MIDTRANS_IS_PROD=false — harmless when confirm() only fired once after a
-	// user actually completed a Snap payment, but with QRIS polling calling
-	// confirm() every few seconds it activated subscriptions with zero payment.
+
 	if sub.PaymentStatus != domain.PaymentStatusPaid && s.expirePendingIfNeeded(ctx, sub, time.Now().UTC()) {
 		if err := s.repo.UpdateSubscription(sub); err != nil {
 			return nil, err
@@ -741,11 +736,6 @@ func (s *service) WatchOrderStatus(_ context.Context, userID uuid.UUID, orderID 
 		}
 	}
 
-	// A cancel func decoupled from the caller's ctx: fasthttp's RequestCtx doesn't
-	// reliably signal client disconnects through Done(), so the HTTP layer is
-	// expected to defer-call this the moment its stream-writer loop exits for any
-	// reason (disconnect, terminal event, flush error) — that's what actually stops
-	// this goroutine and its ticker, not the passed-in ctx.
 	loopCtx, cancel := context.WithCancel(context.Background())
 	time.AfterFunc(streamMaxLifetime, cancel)
 
@@ -787,9 +777,6 @@ func (s *service) WatchOrderStatus(_ context.Context, userID uuid.UUID, orderID 
 				}
 				current = fresh
 				if current.Status == domain.SubscriptionStatusPending {
-					// Same per-user lock Checkout/Confirm/Cancel/webhook use, so this
-					// reconciliation tick can't race a concurrent write to the same
-					// subscription from any of those paths.
 					unlock := s.userLocks.Lock(userID)
 					s.refreshPendingPaymentStatus(loopCtx, current)
 					if s.expirePendingIfNeeded(loopCtx, current, time.Now().UTC()) {
@@ -838,7 +825,7 @@ func (s *service) Cancel(ctx context.Context, userID, id uuid.UUID) error {
 		return err
 	}
 	if sub.Status != domain.SubscriptionStatusActive && sub.Status != domain.SubscriptionStatusPending {
-		return fmt.Errorf("%w: subscription cannot be cancelled from status %s", domain.ErrInvalidInput, sub.Status)
+		return fmt.Errorf("%w: subscription cannot be cancelled from status %s", domain.ErrConflict, sub.Status)
 	}
 	if sub.Status == domain.SubscriptionStatusPending && s.midtrans != nil && strings.TrimSpace(sub.MidtransOrderID) != "" {
 		if err := s.midtrans.CancelTransaction(ctx, sub.MidtransOrderID); err != nil {
@@ -1408,7 +1395,7 @@ func (s *service) UpdateVoucherAdmin(_ context.Context, id uuid.UUID, req dto.Vo
 		return nil, err
 	}
 	if other, err := s.repo.FindVoucherByCode(req.Code); err == nil && other.ID != id {
-		return nil, fmt.Errorf("voucher code already exists")
+		return nil, fmt.Errorf("%w: voucher code already exists", domain.ErrAlreadyExists)
 	} else if err != nil && !errors.Is(err, domain.ErrNotFound) {
 		return nil, err
 	}

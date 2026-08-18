@@ -17,4 +17,8 @@ var (
 	ErrEmailNotRegistered      = errors.New("email is not registered")
 	ErrInvalidOTP              = errors.New("invalid or expired OTP code")
 	ErrProSubscriptionRequired = errors.New("pro subscription required")
+
+	ErrConflict = errors.New("conflict")
+
+	ErrPaymentGatewayUnavailable = errors.New("payment service is temporarily unavailable, please try again in a moment")
 )
