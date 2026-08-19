@@ -67,6 +67,9 @@ func ErrorHandler(c *fiber.Ctx, err error) error {
 	case errors.Is(err, domain.ErrPaymentGatewayUnavailable):
 		code = fiber.StatusServiceUnavailable
 		message = err.Error()
+	case errors.Is(err, domain.ErrAIServiceUnavailable):
+		code = fiber.StatusServiceUnavailable
+		message = err.Error()
 	default:
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) {

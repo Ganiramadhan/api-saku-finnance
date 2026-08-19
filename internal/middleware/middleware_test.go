@@ -111,6 +111,7 @@ func TestErrorHandler_DomainErrors(t *testing.T) {
 		{"invalid input", domain.ErrInvalidInput, http.StatusBadRequest},
 		{"conflict is not a 500", domain.ErrConflict, http.StatusConflict},
 		{"payment gateway unavailable is not a 500", domain.ErrPaymentGatewayUnavailable, http.StatusServiceUnavailable},
+		{"AI service unavailable is not a 500", domain.ErrAIServiceUnavailable, http.StatusServiceUnavailable},
 		{"unknown -> 500", errors.New("boom"), http.StatusInternalServerError},
 		{"fiber error passthrough", fiber.NewError(http.StatusTeapot, "tea"), http.StatusTeapot},
 	}
