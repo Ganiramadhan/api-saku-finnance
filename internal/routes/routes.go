@@ -9,6 +9,7 @@ import (
 	"github.com/ganiramadhan/starter-go/internal/modules/auth"
 	"github.com/ganiramadhan/starter-go/internal/modules/budget"
 	"github.com/ganiramadhan/starter-go/internal/modules/category"
+	"github.com/ganiramadhan/starter-go/internal/modules/landingchat"
 	"github.com/ganiramadhan/starter-go/internal/modules/notification"
 	"github.com/ganiramadhan/starter-go/internal/modules/savingsgoal"
 	"github.com/ganiramadhan/starter-go/internal/modules/splitbill"
@@ -39,6 +40,7 @@ type Handlers struct {
 	Notification *notification.Handler
 	Support      *support.Handler
 	Telegram     *telegram.Handler
+	LandingChat  *landingchat.Handler
 }
 
 func (h Handlers) WithSupport(s *support.Handler) Handlers {
@@ -65,6 +67,8 @@ func Register(app *fiber.App, h Handlers, jwtMgr *jwt.Manager) {
 	subsPub := v1.Group("/subscriptions")
 	subsPub.Get("/plans", h.Subscription.ListPlans)
 	subsPub.Post("/webhook", h.Subscription.Webhook)
+
+	v1.Post("/landing-chat", middleware.SensitiveRateLimiter(20, 5*time.Minute, 10*time.Minute, "Too many messages. Please wait a moment before trying again."), h.LandingChat.Ask)
 
 	if h.Telegram != nil {
 		telegramPub := v1.Group("/telegram")

@@ -19,6 +19,7 @@ import (
 	"github.com/ganiramadhan/starter-go/internal/modules/auth"
 	"github.com/ganiramadhan/starter-go/internal/modules/budget"
 	"github.com/ganiramadhan/starter-go/internal/modules/category"
+	"github.com/ganiramadhan/starter-go/internal/modules/landingchat"
 	"github.com/ganiramadhan/starter-go/internal/modules/notification"
 	"github.com/ganiramadhan/starter-go/internal/modules/savingsgoal"
 	"github.com/ganiramadhan/starter-go/internal/modules/splitbill"
@@ -230,6 +231,7 @@ func (a *App) initHTTP() {
 	// AI (Claude)
 	claudeClient := aiplatform.NewClient(a.cfg.Claude.APIKey, a.cfg.Claude.Model)
 	aiSvc := aimodule.NewService(claudeClient, txnRepo, walletRepo, categoryRepo, aiLogSvc, a.storage, a.cfg.Claude.Model, subSvc)
+	landingChatSvc := landingchat.NewService(claudeClient)
 	telegramSvc := telegram.NewService(userRepo, walletRepo, categoryRepo, txnSvc, aiSvc, telegram.NewHTTPClient(a.cfg.Telegram.BotToken))
 
 	txnHandler := transaction.NewHandler(txnSvc, a.validator)
@@ -250,6 +252,7 @@ func (a *App) initHTTP() {
 		AI:           aimodule.NewHandler(aiSvc, a.validator),
 		Notification: notification.NewHandler(notificationSvc, a.validator),
 		Telegram:     telegram.NewHandler(telegramSvc, a.validator, a.cfg.Telegram.WebhookSecret),
+		LandingChat:  landingchat.NewHandler(landingChatSvc, a.validator),
 	}.WithSupport(support.NewHandler(supportSvc, a.storage, a.validator))
 	routes.Register(a.fiber, handlers, jwtMgr)
 

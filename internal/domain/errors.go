@@ -21,4 +21,6 @@ var (
 	ErrConflict = errors.New("conflict")
 
 	ErrPaymentGatewayUnavailable = errors.New("payment service is temporarily unavailable, please try again in a moment")
+
+	ErrAIServiceUnavailable = errors.New("AI assistant is temporarily unavailable, please try again in a moment")
 )
