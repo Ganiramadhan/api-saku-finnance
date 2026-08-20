@@ -3,6 +3,7 @@ package landingchat
 import (
 	"context"
 	"log"
+	"regexp"
 	"strings"
 
 	"github.com/ganiramadhan/starter-go/internal/domain"
@@ -94,9 +95,32 @@ func (s *service) Ask(ctx context.Context, req dto.LandingChatRequest) (dto.Land
 		return dto.LandingChatResponse{}, domain.ErrAIServiceUnavailable
 	}
 
-	reply = strings.TrimSpace(reply)
+	reply = strings.TrimSpace(stripMarkdown(reply))
 	if reply == "" {
 		return dto.LandingChatResponse{}, domain.ErrAIServiceUnavailable
 	}
 	return dto.LandingChatResponse{Reply: reply}, nil
+}
+
+var (
+	mdCodeFence  = regexp.MustCompile("```[a-zA-Z]*\n?")
+	mdCodeSpan   = regexp.MustCompile("`([^`]+)`")
+	mdLink       = regexp.MustCompile(`\[([^\]]+)\]\([^)]+\)`)
+	mdBoldStar   = regexp.MustCompile(`\*\*([^*]+)\*\*`)
+	mdBoldUnder  = regexp.MustCompile(`__([^_]+)__`)
+	mdBulletLine = regexp.MustCompile(`(?m)^(\s*)[*-]\s+`)
+	mdItalicStar = regexp.MustCompile(`\*([^*\n]+)\*`)
+	mdHeaderLine = regexp.MustCompile(`(?m)^#{1,6}\s+`)
+)
+
+func stripMarkdown(s string) string {
+	s = mdCodeFence.ReplaceAllString(s, "")
+	s = mdCodeSpan.ReplaceAllString(s, "$1")
+	s = mdLink.ReplaceAllString(s, "$1")
+	s = mdBoldStar.ReplaceAllString(s, "$1")
+	s = mdBoldUnder.ReplaceAllString(s, "$1")
+	s = mdBulletLine.ReplaceAllString(s, "$1- ")
+	s = mdItalicStar.ReplaceAllString(s, "$1")
+	s = mdHeaderLine.ReplaceAllString(s, "")
+	return s
 }
