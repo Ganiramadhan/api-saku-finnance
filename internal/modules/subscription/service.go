@@ -24,7 +24,6 @@ const (
 	qrisPaymentExpiry           = 15 * time.Minute
 	virtualAccountExpiry        = 24 * time.Hour
 	snapPageExpiry              = 24 * time.Hour
-	proLaunchDiscountRate       = 0.30
 	streamPollInterval          = 3 * time.Second  // server-side reconciliation cadence for WatchOrderStatus
 	streamMaxLifetime           = 20 * time.Minute // safety net so a stream goroutine can never outlive an invoice
 )
@@ -526,33 +525,16 @@ func (s *service) calculateCheckoutAmounts(plan *domain.Plan, voucherCode string
 		return 0, 0, 0, nil, domain.ErrNotFound
 	}
 	originalAmount := plan.Price
-	launchDiscount := launchPromoDiscount(plan)
-	voucherBaseAmount := originalAmount - launchDiscount
-	if voucherBaseAmount < 0 {
-		voucherBaseAmount = 0
-	}
-	voucherDiscount, voucher, err := s.resolveVoucherDiscount(voucherCode, voucherBaseAmount, now)
+	voucherDiscount, voucher, err := s.resolveVoucherDiscount(voucherCode, originalAmount, now)
 	if err != nil {
 		return 0, 0, 0, nil, err
 	}
-	discountAmount := launchDiscount + voucherDiscount
+	discountAmount := voucherDiscount
 	payAmount := originalAmount - discountAmount
 	if payAmount < 1000 {
 		payAmount = 1000
 	}
 	return originalAmount, discountAmount, payAmount, voucher, nil
-}
-
-func launchPromoDiscount(plan *domain.Plan) float64 {
-	if plan == nil {
-		return 0
-	}
-	code := strings.ToLower(strings.TrimSpace(plan.Code))
-	period := strings.ToLower(strings.TrimSpace(plan.Period))
-	if code != "pro" || period != domain.PlanPeriodMonthly {
-		return 0
-	}
-	return math.Round(plan.Price * proLaunchDiscountRate)
 }
 
 func subscriptionFeatureSummary(code string) []string {
