@@ -760,9 +760,23 @@ func (s *service) WatchOrderStatus(_ context.Context, userID uuid.UUID, orderID 
 				current = fresh
 				if current.Status == domain.SubscriptionStatusPending {
 					unlock := s.userLocks.Lock(userID)
-					s.refreshPendingPaymentStatus(loopCtx, current)
-					if s.expirePendingIfNeeded(loopCtx, current, time.Now().UTC()) {
-						_ = s.repo.UpdateSubscription(current)
+					// Re-read under the lock: `current` above was read before
+					// acquiring it, so a concurrent webhook delivery could have
+					// already settled this order in the gap. Acting on that
+					// stale copy here would both re-run the paid transition
+					// (double referral credit/email, racing the webhook) and,
+					// via UpdateSubscription's full-row Save, overwrite the
+					// webhook's already-committed fields with these older
+					// in-memory values — a lost update. Only trust a copy
+					// fetched after the lock is held.
+					if locked, err := s.repo.FindByOrderID(orderID); err == nil {
+						current = locked
+					}
+					if current.Status == domain.SubscriptionStatusPending {
+						s.refreshPendingPaymentStatus(loopCtx, current)
+						if s.expirePendingIfNeeded(loopCtx, current, time.Now().UTC()) {
+							_ = s.repo.UpdateSubscription(current)
+						}
 					}
 					unlock()
 				}
@@ -834,11 +848,31 @@ func (s *service) HandleWebhook(_ context.Context, p dto.MidtransWebhook) error 
 	if !s.midtrans.VerifySignature(p.OrderID, p.StatusCode, p.GrossAmount, p.SignatureKey) {
 		return fmt.Errorf("invalid signature for order %s", p.OrderID)
 	}
-	// Read-only lookup first (a subscription's UserID never changes after it's
-	// created, so this is safe unlocked), then serialize the actual mutation
-	// per-user — same lock the rest of the payment flow uses, so a webhook can
-	// never race a concurrent Checkout/Confirm/Cancel/WatchOrderStatus tick for
-	// that same user.
+	// Resolve the owning user first (a subscription's UserID never changes,
+	// so this lookup is safe unlocked). Then acquire the per-user lock and
+	// re-fetch payment/subscription FRESH before deciding anything.
+	//
+	// Midtrans is known to retry webhook deliveries for the same order when
+	// it doesn't get a fast enough response. If we read `payment` before
+	// taking the lock and then trust that stale copy after acquiring it,
+	// two concurrent deliveries can both observe PaymentStatusPending and
+	// both apply the paid transition — double referral credit, double
+	// "payment success" emails. Re-reading after the lock closes that
+	// window: the second delivery sees the subscription already Active
+	// (set by the first delivery), so applyMidtransStatus's wasActive
+	// checks correctly no-op the referral reward and success email on
+	// the retry instead of re-granting them.
+	probe, err := s.repo.FindPaymentByOrderID(p.OrderID)
+	if err != nil {
+		return err
+	}
+	if probe.Subscription == nil {
+		return domain.ErrNotFound
+	}
+
+	unlock := s.userLocks.Lock(probe.Subscription.UserID)
+	defer unlock()
+
 	payment, err := s.repo.FindPaymentByOrderID(p.OrderID)
 	if err != nil {
 		return err
@@ -847,7 +881,6 @@ func (s *service) HandleWebhook(_ context.Context, p dto.MidtransWebhook) error 
 	if sub == nil {
 		return domain.ErrNotFound
 	}
-	defer s.userLocks.Lock(sub.UserID)()
 	return s.applyMidtransStatus(payment, sub, p, "midtrans_"+p.TransactionStatus)
 }
 
