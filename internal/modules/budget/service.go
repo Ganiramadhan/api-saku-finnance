@@ -8,7 +8,9 @@ import (
 	"github.com/ganiramadhan/starter-go/internal/dto"
 	"github.com/ganiramadhan/starter-go/internal/modules/category"
 	"github.com/ganiramadhan/starter-go/internal/modules/wallet"
+	"github.com/ganiramadhan/starter-go/internal/platform/audit"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 type Service interface {
@@ -90,7 +92,7 @@ func (s *service) Get(_ context.Context, userID, id uuid.UUID) (*dto.BudgetRespo
 	return &r, nil
 }
 
-func (s *service) Create(_ context.Context, userID uuid.UUID, req dto.CreateBudgetRequest) (*dto.BudgetResponse, error) {
+func (s *service) Create(ctx context.Context, userID uuid.UUID, req dto.CreateBudgetRequest) (*dto.BudgetResponse, error) {
 	if _, err := s.wallets.FindByID(userID, req.WalletID); err != nil {
 		return nil, err
 	}
@@ -105,14 +107,17 @@ func (s *service) Create(_ context.Context, userID uuid.UUID, req dto.CreateBudg
 		LimitAmount: req.LimitAmount,
 		Period:      req.Period,
 	}
-	if err := s.repo.Create(&b); err != nil {
+	err := audit.WithTx(ctx, s.repo.DB(), func(tx *gorm.DB) error {
+		return s.repo.WithTx(tx).Create(&b)
+	})
+	if err != nil {
 		return nil, err
 	}
 	r := s.toResp(b)
 	return &r, nil
 }
 
-func (s *service) Update(_ context.Context, userID, id uuid.UUID, req dto.UpdateBudgetRequest) (*dto.BudgetResponse, error) {
+func (s *service) Update(ctx context.Context, userID, id uuid.UUID, req dto.UpdateBudgetRequest) (*dto.BudgetResponse, error) {
 	b, err := s.repo.FindByID(userID, id)
 	if err != nil {
 		return nil, err
@@ -123,13 +128,18 @@ func (s *service) Update(_ context.Context, userID, id uuid.UUID, req dto.Update
 	if req.Period != "" {
 		b.Period = req.Period
 	}
-	if err := s.repo.Update(b); err != nil {
+	err = audit.WithTx(ctx, s.repo.DB(), func(tx *gorm.DB) error {
+		return s.repo.WithTx(tx).Update(b)
+	})
+	if err != nil {
 		return nil, err
 	}
 	r := s.toResp(*b)
 	return &r, nil
 }
 
-func (s *service) Delete(_ context.Context, userID, id uuid.UUID) error {
-	return s.repo.Delete(userID, id)
+func (s *service) Delete(ctx context.Context, userID, id uuid.UUID) error {
+	return audit.WithTx(ctx, s.repo.DB(), func(tx *gorm.DB) error {
+		return s.repo.WithTx(tx).Delete(userID, id)
+	})
 }

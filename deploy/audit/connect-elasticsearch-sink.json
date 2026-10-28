@@ -1,0 +1,23 @@
+{
+  "_comment": "Reference config for the next step (Kafka -> Elasticsearch). Requires the Confluent Elasticsearch Sink connector jar in the Connect image's plugin path — it is NOT bundled in docker-compose.audit.yml's debezium/connect image. See deploy/audit/README.md 'Wiring the Elasticsearch sink' for how to add it. Until then, use the sample consumer in the README to index documents, or watch the topic with kcat.",
+
+  "name": "saku-audit-logs-es-sink",
+  "config": {
+    "connector.class": "io.confluent.connect.elasticsearch.ElasticsearchSinkConnector",
+    "tasks.max": "1",
+
+    "topics": "saku.public.audit_logs",
+    "connection.url": "http://elasticsearch:9200",
+
+    "type.name": "_doc",
+    "key.ignore": "false",
+    "schema.ignore": "true",
+
+    "transforms": "extractKey",
+    "transforms.extractKey.type": "org.apache.kafka.connect.transforms.ExtractField$Key",
+    "transforms.extractKey.field": "id",
+
+    "behavior.on.null.values": "ignore",
+    "write.method": "insert"
+  }
+}

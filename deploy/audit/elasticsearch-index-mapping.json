@@ -1,0 +1,31 @@
+{
+  "settings": {
+    "number_of_shards": 1,
+    "number_of_replicas": 0,
+    "index.lifecycle.name": "audit-logs-ilm",
+    "index.lifecycle.rollover_alias": "audit-logs"
+  },
+  "mappings": {
+    "properties": {
+      "id":                 { "type": "keyword" },
+      "actor_id":           { "type": "keyword" },
+      "db_user":            { "type": "keyword" },
+      "action":             { "type": "keyword" },
+      "table_name":         { "type": "keyword" },
+      "record_id":          { "type": "keyword" },
+
+      "old_data":           { "type": "object", "enabled": false },
+      "new_data":           { "type": "object", "enabled": false },
+      "changed_data":       { "type": "object", "enabled": true, "dynamic": true },
+
+      "ip_address":         { "type": "ip", "ignore_malformed": true },
+      "user_agent":         { "type": "text" },
+      "request_id":         { "type": "keyword" },
+
+      "is_direct_db_change": { "type": "boolean" },
+      "transaction_id":      { "type": "long" },
+      "statement_ts":        { "type": "date" },
+      "created_at":          { "type": "date" }
+    }
+  }
+}

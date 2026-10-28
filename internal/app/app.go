@@ -16,6 +16,7 @@ import (
 	"github.com/ganiramadhan/starter-go/internal/middleware"
 	aimodule "github.com/ganiramadhan/starter-go/internal/modules/ai"
 	"github.com/ganiramadhan/starter-go/internal/modules/ailog"
+	auditmodule "github.com/ganiramadhan/starter-go/internal/modules/audit"
 	"github.com/ganiramadhan/starter-go/internal/modules/auth"
 	"github.com/ganiramadhan/starter-go/internal/modules/budget"
 	"github.com/ganiramadhan/starter-go/internal/modules/category"
@@ -191,6 +192,7 @@ func (a *App) initHTTP() {
 	categoryRepo := category.NewRepository(a.db)
 	txnRepo := transaction.NewRepository(a.db)
 	aiLogRepo := ailog.NewRepository(a.db)
+	auditRepo := auditmodule.NewRepository(a.db)
 	budgetRepo := budget.NewRepository(a.db)
 	goalRepo := savingsgoal.NewRepository(a.db)
 	splitRepo := splitbill.NewRepository(a.db)
@@ -221,6 +223,7 @@ func (a *App) initHTTP() {
 	txnSvc := transaction.NewService(txnRepo, walletRepo, categoryRepo)
 	txnExportSvc := transaction.NewExportService(txnRepo, walletRepo, categoryRepo)
 	aiLogSvc := ailog.NewService(aiLogRepo, a.storage)
+	auditSvc := auditmodule.NewService(auditRepo)
 	budgetSvc := budget.NewService(budgetRepo, walletRepo, categoryRepo)
 	goalSvc := savingsgoal.NewService(goalRepo)
 	splitSvc := splitbill.NewService(splitRepo)
@@ -244,6 +247,7 @@ func (a *App) initHTTP() {
 		Category:     category.NewHandler(categorySvc, a.validator),
 		Transaction:  txnHandler,
 		AILog:        ailog.NewHandler(aiLogSvc, a.validator),
+		Audit:        auditmodule.NewHandler(auditSvc),
 		Budget:       budget.NewHandler(budgetSvc, a.validator),
 		SavingsGoal:  savingsgoal.NewHandler(goalSvc, a.validator),
 		Subscription: subscription.NewHandler(subSvc, a.validator),

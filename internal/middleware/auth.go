@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/ganiramadhan/starter-go/internal/constants"
+	"github.com/ganiramadhan/starter-go/internal/platform/audit"
 	"github.com/ganiramadhan/starter-go/pkg/httpx"
 	"github.com/ganiramadhan/starter-go/pkg/jwt"
 	"github.com/gofiber/fiber/v2"
@@ -35,6 +36,15 @@ func AuthRequired(j *jwt.Manager) fiber.Handler {
 		c.Locals(httpx.LocalUserID, claims.UserID)
 		c.Locals(httpx.LocalEmail, claims.Email)
 		c.Locals(httpx.LocalRole, claims.Role)
+
+		uid := claims.UserID
+		requestID, _ := c.Locals("requestid").(string)
+		audit.Attach(c, audit.Actor{
+			UserID:    &uid,
+			IP:        c.IP(),
+			UserAgent: string(c.Request().Header.UserAgent()),
+			RequestID: requestID,
+		})
 		return c.Next()
 	}
 }

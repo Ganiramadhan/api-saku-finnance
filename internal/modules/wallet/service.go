@@ -8,6 +8,7 @@ import (
 	"github.com/ganiramadhan/starter-go/internal/domain"
 	"github.com/ganiramadhan/starter-go/internal/dto"
 	"github.com/ganiramadhan/starter-go/internal/modules/subscription"
+	"github.com/ganiramadhan/starter-go/internal/platform/audit"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -143,7 +144,7 @@ func (s *service) Create(ctx context.Context, userID uuid.UUID, req dto.CreateWa
 		BalanceCached: req.Balance,
 		IsDefault:     req.IsDefault,
 	}
-	err := s.repo.DB().Transaction(func(tx *gorm.DB) error {
+	err := audit.WithTx(ctx, s.repo.DB(), func(tx *gorm.DB) error {
 		txr := s.repo.WithTx(tx)
 		if w.IsDefault {
 			if err := txr.ClearDefault(tx, userID, uuid.Nil); err != nil {
@@ -166,7 +167,7 @@ func (s *service) Create(ctx context.Context, userID uuid.UUID, req dto.CreateWa
 	return &r, nil
 }
 
-func (s *service) Update(_ context.Context, userID, id uuid.UUID, req dto.UpdateWalletRequest) (*dto.WalletResponse, error) {
+func (s *service) Update(ctx context.Context, userID, id uuid.UUID, req dto.UpdateWalletRequest) (*dto.WalletResponse, error) {
 	w, err := s.repo.FindByID(userID, id)
 	if err != nil {
 		return nil, err
@@ -187,7 +188,7 @@ func (s *service) Update(_ context.Context, userID, id uuid.UUID, req dto.Update
 		w.IsDefault = *req.IsDefault
 	}
 
-	err = s.repo.DB().Transaction(func(tx *gorm.DB) error {
+	err = audit.WithTx(ctx, s.repo.DB(), func(tx *gorm.DB) error {
 		txr := s.repo.WithTx(tx)
 		if req.IsDefault != nil && *req.IsDefault {
 			if err := txr.ClearDefault(tx, userID, w.ID); err != nil {
@@ -213,7 +214,7 @@ func (s *service) Update(_ context.Context, userID, id uuid.UUID, req dto.Update
 	return &r, nil
 }
 
-func (s *service) Transfer(_ context.Context, userID uuid.UUID, req dto.TransferWalletBalanceRequest) error {
+func (s *service) Transfer(ctx context.Context, userID uuid.UUID, req dto.TransferWalletBalanceRequest) error {
 	if req.FromWalletID == req.ToWalletID {
 		return fiber.NewError(fiber.StatusBadRequest, "Source and destination wallets must be different")
 	}
@@ -236,7 +237,7 @@ func (s *service) Transfer(_ context.Context, userID uuid.UUID, req dto.Transfer
 		return fiber.NewError(fiber.StatusConflict, "Source wallet has an active target. Confirm target removal before transferring balance")
 	}
 
-	return s.repo.DB().Transaction(func(tx *gorm.DB) error {
+	return audit.WithTx(ctx, s.repo.DB(), func(tx *gorm.DB) error {
 		txr := s.repo.WithTx(tx)
 		from.BalanceCached -= req.Amount
 		to.BalanceCached += req.Amount
@@ -264,12 +265,16 @@ func (s *service) Transfer(_ context.Context, userID uuid.UUID, req dto.Transfer
 	})
 }
 
-func (s *service) DeleteTransfers(_ context.Context, userID uuid.UUID, ids []uuid.UUID) error {
-	return s.repo.DeleteTransfers(userID, ids)
+func (s *service) DeleteTransfers(ctx context.Context, userID uuid.UUID, ids []uuid.UUID) error {
+	return audit.WithTx(ctx, s.repo.DB(), func(tx *gorm.DB) error {
+		return s.repo.WithTx(tx).DeleteTransfers(userID, ids)
+	})
 }
 
-func (s *service) Delete(_ context.Context, userID, id uuid.UUID) error {
-	return s.repo.Delete(userID, id)
+func (s *service) Delete(ctx context.Context, userID, id uuid.UUID) error {
+	return audit.WithTx(ctx, s.repo.DB(), func(tx *gorm.DB) error {
+		return s.repo.WithTx(tx).Delete(userID, id)
+	})
 }
 
 func (s *service) enforceFreeWalletLimit(ctx context.Context, userID uuid.UUID) error {

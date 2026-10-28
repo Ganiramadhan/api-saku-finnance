@@ -1,0 +1,65 @@
+services:
+  kafka:
+    image: apache/kafka:3.7.0
+    container_name: saku-audit-kafka
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      CLUSTER_ID: saku-audit-dev-cluster
+    networks: [saku-audit]
+
+  connect:
+    image: debezium/connect:2.6
+    container_name: saku-audit-connect
+    depends_on: [kafka]
+    ports:
+      - "8083:8083"
+    environment:
+      BOOTSTRAP_SERVERS: kafka:9092
+      GROUP_ID: saku-audit-connect
+      CONFIG_STORAGE_TOPIC: _saku_audit_connect_configs
+      OFFSET_STORAGE_TOPIC: _saku_audit_connect_offsets
+      STATUS_STORAGE_TOPIC: _saku_audit_connect_status
+      CONNECT_REST_ADVERTISED_HOST_NAME: connect
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks: [saku-audit]
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.4
+    container_name: saku-audit-es
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+    volumes:
+      - saku-audit-es-data:/usr/share/elasticsearch/data
+    networks: [saku-audit]
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.13.4
+    container_name: saku-audit-kibana
+    depends_on: [elasticsearch]
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+    ports:
+      - "5601:5601"
+    networks: [saku-audit]
+
+volumes:
+  saku-audit-es-data:
+
+networks:
+  saku-audit:
+    name: saku-audit

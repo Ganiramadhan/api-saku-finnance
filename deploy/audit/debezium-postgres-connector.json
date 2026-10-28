@@ -1,0 +1,34 @@
+{
+  "name": "saku-audit-logs-connector",
+  "config": {
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+
+    "database.hostname": "postgres",
+    "database.port": "5432",
+    "database.user": "saku_debezium",
+    "database.password": "change-me-debezium",
+    "database.dbname": "starter",
+
+    "topic.prefix": "saku",
+
+    "plugin.name": "pgoutput",
+    "slot.name": "saku_audit_logs_slot",
+    "publication.name": "saku_audit_logs_pub",
+    "publication.autocreate.mode": "filtered",
+
+    "table.include.list": "public.audit_logs",
+
+    "tombstones.on.delete": "false",
+
+    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "key.converter.schemas.enable": "false",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": "false",
+
+    "transforms": "unwrap",
+    "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
+    "transforms.unwrap.drop.tombstones": "true",
+
+    "heartbeat.interval.ms": "10000"
+  }
+}

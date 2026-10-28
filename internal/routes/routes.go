@@ -6,6 +6,7 @@ import (
 	"github.com/ganiramadhan/starter-go/internal/middleware"
 	"github.com/ganiramadhan/starter-go/internal/modules/ai"
 	"github.com/ganiramadhan/starter-go/internal/modules/ailog"
+	"github.com/ganiramadhan/starter-go/internal/modules/audit"
 	"github.com/ganiramadhan/starter-go/internal/modules/auth"
 	"github.com/ganiramadhan/starter-go/internal/modules/budget"
 	"github.com/ganiramadhan/starter-go/internal/modules/category"
@@ -31,6 +32,7 @@ type Handlers struct {
 	Category     *category.Handler
 	Transaction  *transaction.Handler
 	AILog        *ailog.Handler
+	Audit        *audit.Handler
 	Budget       *budget.Handler
 	SavingsGoal  *savingsgoal.Handler
 	Subscription *subscription.Handler
@@ -209,4 +211,9 @@ func Register(app *fiber.App, h Handlers, jwtMgr *jwt.Manager) {
 	// ---------------- Super Admin (auth + role=super_admin) ----------------
 	superAdmin := v1.Group("/admin", authRequired, middleware.RequireSuperAdmin)
 	superAdmin.Get("/ai-logs", h.AILog.ListAll)
+	if h.Audit != nil {
+		superAdmin.Get("/audit-logs", h.Audit.List)
+		superAdmin.Get("/audit-logs/:id", h.Audit.Get)
+		superAdmin.Get("/audit-logs/records/:table/:recordId", h.Audit.ForRecord)
+	}
 }

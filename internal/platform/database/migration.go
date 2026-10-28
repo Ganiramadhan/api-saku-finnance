@@ -53,6 +53,10 @@ func Migrate(db *gorm.DB) error {
 		return fmt.Errorf("ensure foreign keys: %w", err)
 	}
 
+	if err := MigrateAudit(db); err != nil {
+		return fmt.Errorf("migrate audit trail: %w", err)
+	}
+
 	return nil
 }
 

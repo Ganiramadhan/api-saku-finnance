@@ -15,11 +15,17 @@ type Repository interface {
 	Update(b *domain.Budget) error
 	Delete(userID, id uuid.UUID) error
 	SumSpent(userID, walletID, categoryID uuid.UUID, start, end time.Time) (float64, error)
+	WithTx(tx *gorm.DB) Repository
+	DB() *gorm.DB
 }
 
 type repository struct{ db *gorm.DB }
 
 func NewRepository(db *gorm.DB) Repository { return &repository{db: db} }
+
+func (r *repository) DB() *gorm.DB { return r.db }
+
+func (r *repository) WithTx(tx *gorm.DB) Repository { return &repository{db: tx} }
 
 func (r *repository) List(userID uuid.UUID) ([]domain.Budget, error) {
 	var rows []domain.Budget

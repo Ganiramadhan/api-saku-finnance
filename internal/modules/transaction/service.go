@@ -10,6 +10,7 @@ import (
 	"github.com/ganiramadhan/starter-go/internal/dto"
 	"github.com/ganiramadhan/starter-go/internal/modules/category"
 	"github.com/ganiramadhan/starter-go/internal/modules/wallet"
+	"github.com/ganiramadhan/starter-go/internal/platform/audit"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
@@ -123,7 +124,7 @@ func (s *service) validateWalletAndCategory(userID, walletID, categoryID uuid.UU
 	return nil
 }
 
-func (s *service) Create(_ context.Context, userID uuid.UUID, req dto.CreateTransactionRequest) (*dto.TransactionResponse, error) {
+func (s *service) Create(ctx context.Context, userID uuid.UUID, req dto.CreateTransactionRequest) (*dto.TransactionResponse, error) {
 	if err := s.validateWalletAndCategory(userID, req.WalletID, req.CategoryID); err != nil {
 		return nil, err
 	}
@@ -148,7 +149,7 @@ func (s *service) Create(_ context.Context, userID uuid.UUID, req dto.CreateTran
 		ConfidenceScore: req.ConfidenceScore,
 	}
 
-	err := s.repo.DB().Transaction(func(tx *gorm.DB) error {
+	err := audit.WithTx(ctx, s.repo.DB(), func(tx *gorm.DB) error {
 		if err := tx.Create(&t).Error; err != nil {
 			return err
 		}
@@ -161,7 +162,7 @@ func (s *service) Create(_ context.Context, userID uuid.UUID, req dto.CreateTran
 	return &r, nil
 }
 
-func (s *service) Update(_ context.Context, userID, id uuid.UUID, req dto.UpdateTransactionRequest) (*dto.TransactionResponse, error) {
+func (s *service) Update(ctx context.Context, userID, id uuid.UUID, req dto.UpdateTransactionRequest) (*dto.TransactionResponse, error) {
 	t, err := s.repo.FindByID(userID, id)
 	if err != nil {
 		return nil, err
@@ -211,7 +212,7 @@ func (s *service) Update(_ context.Context, userID, id uuid.UUID, req dto.Update
 
 	newDelta := signedAmount(t.Type, t.Amount)
 
-	err = s.repo.DB().Transaction(func(tx *gorm.DB) error {
+	err = audit.WithTx(ctx, s.repo.DB(), func(tx *gorm.DB) error {
 		updatedAt := time.Now().UTC()
 		t.UpdatedAt = updatedAt
 		updates := map[string]any{
@@ -244,13 +245,13 @@ func (s *service) Update(_ context.Context, userID, id uuid.UUID, req dto.Update
 	return &r, nil
 }
 
-func (s *service) Delete(_ context.Context, userID, id uuid.UUID) error {
+func (s *service) Delete(ctx context.Context, userID, id uuid.UUID) error {
 	t, err := s.repo.FindByID(userID, id)
 	if err != nil {
 		return err
 	}
 	delta := signedAmount(t.Type, t.Amount)
-	return s.repo.DB().Transaction(func(tx *gorm.DB) error {
+	return audit.WithTx(ctx, s.repo.DB(), func(tx *gorm.DB) error {
 		if err := tx.Delete(t).Error; err != nil {
 			return err
 		}
